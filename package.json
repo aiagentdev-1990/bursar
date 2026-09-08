@@ -1,0 +1,11 @@
+{
+  "name": "roster",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "contracts:build": "cd packages/contracts && forge build",
+    "contracts:test": "cd packages/contracts && forge test -vv",
+    "api:dev": "pnpm --filter @roster/api dev",
+    "web:dev": "pnpm --filter @roster/web dev"
+  }
+}

@@ -11,7 +11,10 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
 
 ## Day 1 — the guarantee
 
-- [ ] **1. Allowance Contract on Arc testnet**
+- [x] **1. Allowance Contract on Arc testnet** — written and tested 2026-09-09; **deployment still
+      pending** an RPC URL and a funded key. `Roster.sol` + `RosterFactory.sol`, 35 tests passing,
+      all four testing-bar cases covered. `sweepUnspent` dropped and the period fixed at 30 days;
+      see DECISIONS.md 2026-09-09.
   > Read docs/TECH-DESIGN.md §4.2–4.4 and §5. Implement `packages/contracts/src/Roster.sol`
   > against `IRoster.sol` — every function in §5, custom errors, the events in §4. Period reset is
   > lazy (computed inside `executeSpend`, no maintenance call). Write `test/Roster.t.sol` first,
@@ -44,7 +47,8 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
 - [ ] **5. The agent's x402 payment tool**
   > The one component that has to work inside a Claude Managed Agents session, not just in
   > isolation. Reads a 402 response, calls `executeSpend`, and on success signs and retries the
-  > x402 request. Handle the failure branch: released-but-unspent triggers `sweepUnspent`.
+  > x402 request. The failure branch — released but not spent — currently strands the USDC in the
+  > agent's wallet; there is no sweep. Log it clearly rather than pretending it reconciles.
 
 - [ ] **6. Backend endpoints**
   > All of TECH-DESIGN.md §6 in `apps/api`. Owner-authenticated only — agents never call these.

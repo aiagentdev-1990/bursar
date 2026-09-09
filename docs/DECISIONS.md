@@ -2,6 +2,38 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-09 — Contract shape: fixed period, no sweep, one Roster per team
+Three changes settled while building checkpoint 1. Each closes an open item above.
+
+**`periodLength` is gone; the period is a fixed `PERIOD_LENGTH = 30 days`.** It was carried on
+`AgentInfo` but `hireAgent` never took one and §5 had no setter, so it had no source. Making it a
+constant rather than a parameter is what the 2026-09-09 monthly decision already implied: the
+dashboard says "Monthly cap" and "September cap" everywhere, and a per-agent period would let the
+UI name a boundary the contract wasn't enforcing. `periodStart` advances by whole periods, so an
+agent that goes quiet for three months does not get a fresh period starting the moment it wakes up.
+
+**`sweepUnspent` is removed, not deferred-in-place.** It could not work as specified: pulling USDC
+back from an agent's wallet needs an ERC-20 allowance that §4.1's onboarding never established.
+Rather than ship a function that reverts, it is out of the interface entirely. The exposure it was
+meant to cover is already bounded by the 2026-09-08 point-of-use release below — at most one
+request's worth is ever stranded. Reintroduce it only alongside the approve step in onboarding that
+it actually requires. `FundsSwept` and `POST /agents/{id}/sweep` are gone with it.
+
+**`fundAgent` earmarks USDC the Roster already holds; it does not pull from the owner.** No
+`transferFrom`, no owner approval step. This matches §4.6, where Bridge Kit delivers to the Roster
+address and funding is the allocation that follows. The contract tracks `totalEarmarked` and
+refuses any `fundAgent` that would earmark more than the balance covers — otherwise the same USDC
+could be promised to two agents and the second would fail at transfer time rather than at the
+moment the owner made the mistake.
+
+**One Roster per agent team, deployed by `RosterFactory` as EIP-1167 minimal proxies.** A team is
+the natural tenancy boundary: one owner, one treasury, one set of agents. Clones make a new team a
+45-byte deployment over a shared implementation. Deliberately **not** upgradeable — R4 is that the
+contract is the single point of enforcement and therefore the single point of failure, and an
+upgrade path would add a second way for the guarantee to fail, one an owner could not audit by
+reading the code their agents are bound to. Isolation now holds at two levels: between agents on a
+Roster (storage layout, §4.4) and between teams (separate contracts, separate treasuries).
+
 ## 2026-09-09 — The five mockup/PRD discrepancies, settled for checkpoint 8
 Resolved in the order they appear in `docs/mockups/README.md`. The mockups win on anything that is
 purely presentational; the PRD wins on anything the demo has to perform live.
@@ -45,8 +77,9 @@ settlement path is confirmed.
 ## 2026-09-08 — The contract holds the treasury; agents hold nothing standing
 `executeSpend` releases USDC to the agent's own wallet only at point of use, immediately before
 the x402 retry. This bounds the released-but-unspent exposure to a single request instead of an
-accumulating balance, which is what makes the kill switch meaningful. `sweepUnspent` reclaims
-anything stranded by a failed payment or a revocation.
+accumulating balance, which is what makes the kill switch meaningful. *(Amended 2026-09-09: the
+`sweepUnspent` half of this is removed — see above. The point-of-use release stands, and is now the
+only thing bounding the exposure.)*
 
 ## 2026-09-08 — Dashboard reads Blockscout, not the contract
 No indexer to build or maintain. Roster overview and the pending screen are both views over the
@@ -56,13 +89,10 @@ same `/api/v2/addresses/{contract}/logs` event stream.
 - Circle Agent Stack testnet SDK on Arc: real, or hand-roll x402?
 - Agent identity: plain address or ERC-8004?
 - Keep "payroll" (recurring top-up) or cut it?
-- `periodLength` has no source: `AgentInfo` carries it, `hireAgent` doesn't take it and no setter
-  exists in §5. The 2026-09-09 decision above fixes it at 30 days, but the signature still has to
-  say so — constructor constant or a fifth `hireAgent` parameter.
-- `sweepUnspent` needs an ERC-20 allowance from the agent's wallet to the contract, which nothing
-  in §4.1's onboarding sequence establishes. Blocks checkpoint 3.
 - The contract has no `name` field, but the hire form collects Name *and* Role as separate inputs.
   Either the backend stores the name off-chain keyed by agent address, or the `role` string carries
   both. Blocks checkpoint 6; does not block the UI, which treats name as backend-owned.
+
+*(`periodLength` and `sweepUnspent`: both settled 2026-09-09 — see the contract-shape entry above.)*
 
 *(Three demo agents or two: settled 2026-09-09 — five on the roster, three driven live.)*

@@ -4,11 +4,11 @@
 //
 // Endpoints to implement (checkpoint 6):
 //   POST   /agents                        hire — Privy wallet + hireAgent + Claude agent/env/session (§4.1)
+//                                         (one Roster per team; RosterFactory.createRoster deploys it)
 //   GET    /agents                        roster overview
 //   GET    /agents/:id                    detail
 //   PATCH  /agents/:id/caps               updateCaps
 //   POST   /agents/:id/revoke             revokeAgent (§4.4)
-//   POST   /agents/:id/sweep              sweepUnspent
 //   GET    /agents/:id/activity           Blockscout proxy (§4.5)
 //   GET    /pending                       all open pending requests
 //   POST   /pending/:requestId/approve    approvePending, THEN the Claude session-resume event (§4.3)

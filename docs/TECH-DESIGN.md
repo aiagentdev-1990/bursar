@@ -145,7 +145,7 @@ No owner signature anywhere in this path. `executeSpend` is `onlyAgent`.
 
 **Timing matters.** `executeSpend` fires immediately before the agent retries the x402 request, not ahead of time as a batch top-up — that bounds the released-but-unspent window to a single request.
 
-**Failure case: release succeeds but the x402 payment doesn't.** `sweepUnspent(agent)` returns any USDC sitting in that agent's wallet back to the contract treasury, restoring it against the period cap. Same function does double duty in §4.4.
+**Failure case: release succeeds but the x402 payment doesn't.** The USDC stays in the agent's wallet and counts against its period cap. Nothing reclaims it today — `sweepUnspent` was removed (see §5). The point-of-use release above is what keeps this bounded: at most one request's worth is ever stranded, rather than an accumulating balance. Reclaiming it needs an ERC-20 allowance from the agent's wallet, which §4.1's onboarding would have to establish first.
 
 ### 4.3 Above-cap payment → pending approval
 
@@ -189,17 +189,11 @@ sequenceDiagram
     Note over Contract: agent.active = false
     Agent->>Contract: executeSpend(...)
     Contract-->>Agent: Reverts — AgentNotActive
-
-    opt owner wants to reclaim any released-but-unspent balance
-        Backend->>Contract: sweepUnspent(address)
-        Contract->>Contract: Transfer agent wallet's USDC balance back to treasury
-        Contract-->>Backend: FundsSwept event
-    end
 ```
 
 `revokeAgent` touches only that agent's record — isolation is a property of the storage layout (one struct per agent address), not application logic.
 
-**What revocation does and doesn't cover.** It stops every *future* `executeSpend`. It does not claw back USDC already released to that agent's wallet — the contract is non-custodial of funds once they've moved. `sweepUnspent` is the owner's explicit follow-up tool for that.
+**What revocation does and doesn't cover.** It stops every *future* `executeSpend`, and it also blocks `approvePending` on any request that agent left outstanding — otherwise the kill switch would have a hole in it. It does not claw back USDC already released to that agent's wallet: the contract is non-custodial of funds once they've moved, and there is no sweep. What remains unearmarked stays in the treasury for the rest of the roster.
 
 ### 4.5 Dashboard & activity feed
 
@@ -241,24 +235,41 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 ## Open technical questions
 
 1. Does Circle's Agent Stack expose a testnet-ready SDK on Arc, or does §4.2's facilitator interaction need to be built against the raw x402 spec directly?
-2. Does `executeSpend`'s `onlyAgent` check bind to a plain contract address, or does agent identity need to resolve through ERC-8004?
+2. Does `executeSpend`'s `onlyAgent` check bind to a plain contract address, or does agent identity need to resolve through ERC-8004? *(Implemented as a plain address; ERC-8004 is on the backlog's cut list and nothing in the contract assumes either answer.)*
 
 ## 5. Smart contract functions
 
 | Function signature | Access control | Purpose |
 |---|---|---|
 | `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap, string calldata role)` | `onlyOwner` | Registers a new agent's wallet address, its two caps, and its role label. §4.1 |
-| `fundAgent(address agent, uint256 amount)` | `onlyOwner` | Deposits USDC into that agent's earmarked balance. §4.6 |
+| `initialize(address owner)` | Once, by the factory | Sets the owner. Replaces a constructor, which a minimal proxy cannot run. |
+| `fundAgent(address agent, uint256 amount)` | `onlyOwner` | Earmarks USDC the Roster **already holds** for that agent. Moves no tokens. Reverts if the balance can't cover every earmark. §4.6 |
 | `executeSpend(uint256 amount, address payee, bytes calldata memo) returns (bool executed, uint256 requestId)` | `onlyAgent` | Checks both caps. If satisfied, transfers `amount` to the agent's own wallet and returns `executed = true`. If not, opens a pending request. §4.2, §4.3 |
 | `approvePending(uint256 requestId)` | `onlyOwner` | Releases a held request's funds. §4.3 |
 | `rejectPending(uint256 requestId)` | `onlyOwner` | Closes a held request with no funds moved. §4.3 |
 | `revokeAgent(address agent)` | `onlyOwner` | Sets that agent's `active` flag false. Touches only that agent's record. §4.4 |
 | `updateCaps(address agent, uint256 newPerTxCap, uint256 newPerPeriodCap)` | `onlyOwner` | Adjusts caps without a full revoke/re-hire (R8's "reduce" half). |
-| `sweepUnspent(address agent)` | `onlyOwner` or `onlyAgent` | Returns USDC sitting in the agent's wallet back to its earmarked balance. §4.2, §4.4 |
 | `getAgent(address agent) view returns (AgentInfo memory)` | Public | Caps, role, active status, current period spend, earmarked balance. |
 | `getPendingRequest(uint256 requestId) view returns (PendingRequest memory)` | Public | Amount, payee, memo, requesting agent. |
+| `owner() / PERIOD_LENGTH() / totalEarmarked()` | Public | Owner, the fixed 30-day period, and the sum of every agent's earmark. |
 
-**Note on period resets:** no `resetPeriod` function. `executeSpend` computes whether the current timestamp has crossed the agent's period boundary since its last recorded reset, and if so zeroes the period-spend counter before checking the cap.
+**Note on period resets:** no `resetPeriod` function. `executeSpend` computes whether the current timestamp has crossed the agent's period boundary since its last recorded reset, and if so zeroes the period-spend counter before checking the cap. The period is a fixed `PERIOD_LENGTH = 30 days` for every agent on every Roster, not a per-agent field — see DECISIONS.md 2026-09-09. `periodStart` advances by whole periods, so an agent that goes quiet for three months does not get a fresh period beginning the moment it wakes up.
+
+**Note on `sweepUnspent`:** removed. It needed an ERC-20 allowance from the agent's wallet to the contract that §4.1's onboarding never established. Nothing reclaims released-but-unspent USDC today; the exposure is bounded to a single request by the point-of-use release in §4.2, which is what made the sweep optional in the first place. See DECISIONS.md 2026-09-09.
+
+### 5.1 One Roster per team — `RosterFactory`
+
+A Roster is one owner's team. `RosterFactory.createRoster(owner)` deploys each one as an EIP-1167 minimal proxy over a single implementation, so a new team costs a 45-byte deployment.
+
+| Function | Purpose |
+|---|---|
+| `createRoster(address owner) returns (address)` | Deploy and initialize a Roster owned by `owner`. Permissionless. |
+| `implementation()` | The shared Roster implementation. Locked at factory construction. |
+| `rostersOf(address owner) / rosterCount() / rosterAt(uint256)` | Enumeration for the dashboard. |
+
+**Deliberately not upgradeable.** The clones delegatecall a fixed implementation and no admin can swap it. R4 is that the contract is the single point of enforcement and therefore the single point of failure; an upgrade path adds a second way for the guarantee to fail — one an owner cannot audit by reading the code their agents are bound to.
+
+Isolation now holds at two levels: between agents on one Roster (a storage-layout property, §4.4) and between teams (separate contracts, separate treasuries).
 
 ## 6. Backend endpoints
 
@@ -271,7 +282,6 @@ Owner-authenticated only. Agents never call these; an agent's payment tool talks
 | `GET /agents/{id}` | Single agent detail. |
 | `PATCH /agents/{id}/caps` | Calls `updateCaps`. |
 | `POST /agents/{id}/revoke` | Calls `revokeAgent`. §4.4 |
-| `POST /agents/{id}/sweep` | Calls `sweepUnspent`. |
 | `GET /agents/{id}/activity` | Per-agent feed, proxying Blockscout. §4.5 |
 | `GET /pending` | All pending approval requests. |
 | `POST /pending/{requestId}/approve` | Calls `approvePending`, then sends the Claude session event. §4.3 |
@@ -284,7 +294,7 @@ Owner-authenticated only. Agents never call these; an agent's payment tool talks
 
 | # | Checkpoint | Notes |
 |---|---|---|
-| 1 | Deploy the Allowance Contract to Arc testnet | All functions in §5, with unit tests covering cap math and lazy period-reset. |
+| 1 | Deploy the Allowance Contract to Arc testnet | All functions in §5, with unit tests covering cap math and lazy period-reset. Contract and factory written and tested 2026-09-09; deployment pending an RPC URL and a funded key. |
 | 2 | Verify Circle's Arc-testnet x402 facilitator end-to-end | Against one real service, before building anything on top of it. |
 | 3 | Wire Privy wallet creation | Owner and agents; confirm an agent wallet can sign `executeSpend` and a real x402 header. |
 | 4 | Create the Claude Managed Agents resources | One Agent config per role, one Environment, `managed-agents-2026-04-01` header. |

@@ -46,6 +46,14 @@ const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   CLAUDE_ENVIRONMENT_ID: z.string().optional(),
 
+  /// The roster-payments skill, attached to every role's Agent config.
+  /// Note the two id shapes: `skill_…` identifies the skill, `skver_…` a specific version of it.
+  /// Passing a version id as the skill id is rejected with "skill_id not found".
+  CLAUDE_PAYMENT_SKILL_ID: z.string().default('skill_01KbK1RJhZ1gGXL5NeijmU6L'),
+  /// Pinned so a re-upload cannot change agent behaviour underneath a running demo.
+  /// Set to "latest" to track edits instead.
+  CLAUDE_PAYMENT_SKILL_VERSION: z.string().default('skver_01TrRWRjpkUr8JgoGkFc59nS'),
+
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
   /// Where services/store.ts keeps operational state. Tests point this at a temp file.

@@ -33,19 +33,24 @@ function systemPromptFor(role: string): string {
   return [
     `You are a hired agent on a business owner's roster. Your role: ${role}.`,
     '',
-    'You hold a spending allowance enforced by an on-chain contract. Pay for what your role',
-    'requires using your payment tool. If a payment exceeds your allowance the contract holds it',
-    'for the owner to approve — that is expected, not an error. Say what you were trying to buy',
+    'You hold a spending allowance enforced by an on-chain contract. Your roster-payments skill',
+    'explains how to spend it — follow it. If a payment exceeds your allowance the contract holds',
+    'it for the owner to approve; that is expected, not an error. Say what you were trying to buy',
     'and why, then continue with anything that does not depend on it.',
     '',
     'Never attempt to work around a spending limit.',
   ].join('\n')
 }
 
-/// One Agent config per role, created once and cached. Production should provision these from
-/// version-controlled YAML with the `ant` CLI and pass the ids in; this covers the demo path.
+/// One Agent config per role, created once and cached.
+///
+/// The cache key includes the skill id: changing which skill an agent gets is a behaviour change,
+/// and a config cached under the bare role name would silently keep serving the old one.
 async function agentConfigForRole(role: string): Promise<{ id: string; version: number }> {
-  const cached = store.getAgentConfig(role)
+  const { CLAUDE_PAYMENT_SKILL_ID: skillId, CLAUDE_PAYMENT_SKILL_VERSION: skillVersion } = loadEnv()
+  const cacheKey = `${role}::${skillId}@${skillVersion}`
+
+  const cached = store.getAgentConfig(cacheKey)
   if (cached) return cached
 
   const agent = await anthropic().beta.agents.create({
@@ -53,10 +58,11 @@ async function agentConfigForRole(role: string): Promise<{ id: string; version: 
     model: MODEL,
     system: systemPromptFor(role),
     tools: [{ type: 'agent_toolset_20260401', default_config: { enabled: true } }],
+    skills: [{ type: 'custom', skill_id: skillId, version: skillVersion }],
   })
 
   const config = { id: agent.id, version: agent.version }
-  store.setAgentConfig(role, config)
+  store.setAgentConfig(cacheKey, config)
   return config
 }
 

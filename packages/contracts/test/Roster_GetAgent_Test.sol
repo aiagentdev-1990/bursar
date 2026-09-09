@@ -51,15 +51,52 @@ contract Roster_GetAgent_Test is RosterTestBase {
         assertEq(_agent(pricer).earmarkedBalance, EARMARK - PRICER_PER_TX);
     }
 
-    /// The view does not roll the period — only `executeSpend` does. So a stale `periodSpend`
-    /// after a boundary is expected, and the budget bar it draws is a hint, not the enforcement.
-    function test_DoesNotRollThePeriodItself() public {
+    /// The view reports the period the contract would enforce right now, not the one it last
+    /// wrote. Without this the dashboard draws an exhausted budget bar for an agent that can
+    /// spend, and the pending screen's "monthly cap after" is wrong by a whole period.
+    function test_ReportsTheRolledPeriodAfterABoundary() public {
         _spend(pricer, PRICER_PER_TX);
         uint256 periodStart = _agent(pricer).periodStart;
 
         vm.warp(periodStart + roster.PERIOD_LENGTH() + 1);
 
-        assertEq(_agent(pricer).periodSpend, PRICER_PER_TX, "the view is passive");
-        assertEq(_agent(pricer).periodStart, periodStart);
+        assertEq(_agent(pricer).periodSpend, 0, "the new period is empty");
+        assertEq(_agent(pricer).periodStart, periodStart + roster.PERIOD_LENGTH());
+    }
+
+    /// And what it reports is exactly what the next spend does — one implementation of the reset,
+    /// used by both the enforcement and the display.
+    function test_TheRolledViewMatchesWhatTheNextSpendActuallyWrites() public {
+        _spend(pricer, PRICER_PER_TX);
+        vm.warp(_agent(pricer).periodStart + roster.PERIOD_LENGTH());
+
+        IRoster.AgentInfo memory predicted = _agent(pricer);
+
+        _spend(pricer, PRICER_PER_TX);
+
+        assertEq(_agent(pricer).periodStart, predicted.periodStart, "same boundary");
+        assertEq(_agent(pricer).periodSpend, predicted.periodSpend + PRICER_PER_TX);
+    }
+
+    /// Reading is still free of side effects — the roll is computed on a memory copy, so two
+    /// reads either side of a spend differ only by the spend.
+    function test_ReadingDoesNotAdvanceAnything() public {
+        vm.warp(_agent(pricer).periodStart + roster.PERIOD_LENGTH() + 5 days);
+
+        IRoster.AgentInfo memory first = _agent(pricer);
+        IRoster.AgentInfo memory second = _agent(pricer);
+
+        assertEq(first.periodStart, second.periodStart);
+        assertEq(first.periodSpend, second.periodSpend);
+    }
+
+    /// An unregistered address has `periodStart` zero, which would otherwise roll to an absurd
+    /// value. The empty struct is returned untouched.
+    function test_DoesNotRollAnUnregisteredAddress() public {
+        vm.warp(block.timestamp + 3650 days);
+
+        IRoster.AgentInfo memory info = _agent(stranger);
+        assertEq(info.periodStart, 0);
+        assertEq(info.periodSpend, 0);
     }
 }

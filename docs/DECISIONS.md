@@ -2,6 +2,21 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-09 — `getAgent` reports the period the contract would enforce
+Found by auditing the contract. `getAgent` returned raw storage, and `periodSpend` is only
+zeroed inside `executeSpend`/`approvePending`. So between a period boundary and the agent's next
+spend, the view still reported the previous period's total — measured on the fixture: it read
+400/400 spent while the contract would happily execute a spend.
+
+That is the number the dashboard's budget bar is drawn from, and the number the pending screen's
+"monthly cap after" is computed from, and `apps/api` passes it through verbatim. Past day 30 of
+any agent's life the UI would show an exhausted budget for an agent that can spend.
+
+`getAgent` now applies the reset to its return value. The arithmetic lives in one private helper
+used by both the storage write and the view, so there is no second implementation of period
+math to drift — which is the same reason the dashboard reads `getAgent` at all instead of
+recomputing spend from events.
+
 ## 2026-09-09 — §5 amendment: funds must be able to leave the Roster
 Found by auditing the contract. `fundAgent` had no counterpart, and the Roster had no exit at
 all, so two things were permanently locked:

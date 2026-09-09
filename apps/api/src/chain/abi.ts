@@ -134,7 +134,7 @@ export const rosterAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "info",
         "type": "tuple",
         "internalType": "struct IRoster.AgentInfo",
         "components": [

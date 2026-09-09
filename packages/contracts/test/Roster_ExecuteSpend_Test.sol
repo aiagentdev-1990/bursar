@@ -102,17 +102,30 @@ contract Roster_ExecuteSpend_Test is RosterTestBase {
         );
     }
 
-    /// The reset is per-agent. One agent crossing its boundary does not roll anyone else's.
-    function test_ResettingOneAgentsPeriodLeavesAnothersAlone() public {
-        _spend(concierge, CONCIERGE_PER_TX);
-        uint256 conciergeStart = _agent(concierge).periodStart;
-        uint256 conciergeSpend = _agent(concierge).periodSpend;
+    /// Periods are anchored per agent, to its own hire — not to a roster-wide clock. An agent
+    /// crossing its boundary does not roll one hired later, whose boundary has not arrived.
+    function test_PeriodsAreAnchoredPerAgentNotGlobally() public {
+        uint256 period = roster.PERIOD_LENGTH();
+        uint256 pricerStart = _agent(pricer).periodStart;
 
-        vm.warp(block.timestamp + roster.PERIOD_LENGTH());
+        // Hire a third agent ten days in, so the two boundaries differ.
+        vm.warp(pricerStart + 10 days);
+        vm.startPrank(owner);
+        roster.hireAgent(stranger, 10 * USD, 100 * USD, "Later hire");
+        roster.fundAgent(stranger, 100 * USD);
+        vm.stopPrank();
+        uint256 strangerStart = _agent(stranger).periodStart;
+
         _spend(pricer, PRICER_PER_TX);
+        _spend(stranger, 5 * USD);
 
-        assertEq(_agent(concierge).periodStart, conciergeStart, "untouched until it spends");
-        assertEq(_agent(concierge).periodSpend, conciergeSpend);
+        // Cross pricer's boundary, but not the later hire's.
+        vm.warp(pricerStart + period);
+
+        assertEq(_agent(pricer).periodSpend, 0, "pricer's period has rolled");
+        assertEq(_agent(pricer).periodStart, pricerStart + period);
+        assertEq(_agent(stranger).periodSpend, 5 * USD, "the later hire's has not");
+        assertEq(_agent(stranger).periodStart, strangerStart);
     }
 
     // ─── funds and accounting ─────────────────────────────────────────────────

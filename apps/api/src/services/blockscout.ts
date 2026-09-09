@@ -13,6 +13,9 @@ import { ApiError } from '../http/errors.js'
 /// contract's lazy period reset in TypeScript. A second implementation of cap arithmetic is
 /// exactly the thing that can disagree with the contract, and for this product a dashboard that
 /// disagrees with the enforcement is worse than one extra call.
+///
+/// `getAgent` applies that reset to what it returns, so the period it reports is the one the
+/// next spend will enforce — nothing here has to adjust for a crossed boundary.
 
 const env = loadEnv()
 

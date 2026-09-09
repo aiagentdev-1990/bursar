@@ -230,17 +230,29 @@ contract Roster is IRoster {
 
     // ─── internals ────────────────────────────────────────────────────────────
 
-    /// @dev Advances by whole periods, so the cadence stays anchored to the hire date instead of
+    /// @dev The lazy reset as a pure computation, so there is exactly one implementation of it.
+    ///      `_rollPeriod` writes the result; `getAgent` applies it to a memory copy. Two separate
+    ///      implementations of period arithmetic — one that enforces and one that displays — is
+    ///      precisely the disagreement this contract exists to prevent.
+    ///
+    ///      Advances by whole periods, so the cadence stays anchored to the hire date instead of
     ///      drifting to whenever the agent next happens to spend. An agent that goes quiet for
     ///      three months does not get a fresh period starting the moment it wakes up.
-    function _rollPeriod(AgentInfo storage info) private {
-        uint256 elapsed = block.timestamp - info.periodStart;
-        if (elapsed < PERIOD_LENGTH) return;
+    function _rolled(uint256 periodStart, uint256 periodSpend) private view returns (uint256, uint256) {
+        uint256 elapsed = block.timestamp - periodStart;
+        if (elapsed < PERIOD_LENGTH) return (periodStart, periodSpend);
 
         unchecked {
-            info.periodStart += (elapsed / PERIOD_LENGTH) * PERIOD_LENGTH;
+            return (periodStart + (elapsed / PERIOD_LENGTH) * PERIOD_LENGTH, 0);
         }
-        info.periodSpend = 0;
+    }
+
+    function _rollPeriod(AgentInfo storage info) private {
+        (uint256 periodStart, uint256 periodSpend) = _rolled(info.periodStart, info.periodSpend);
+        if (periodStart == info.periodStart) return;
+
+        info.periodStart = periodStart;
+        info.periodSpend = periodSpend;
     }
 
     /// @dev The one place funds leave this contract. Charging the period and debiting the
@@ -261,8 +273,16 @@ contract Roster is IRoster {
     // ─── views ────────────────────────────────────────────────────────────────
 
     /// @inheritdoc IRoster
-    function getAgent(address agent) external view returns (AgentInfo memory) {
-        return _agents[agent];
+    function getAgent(address agent) external view returns (AgentInfo memory info) {
+        info = _agents[agent];
+        if (!info.registered) return info;
+
+        // Apply the same reset `executeSpend` would, so a caller sees the period the contract
+        // will actually enforce rather than the one it last wrote. Without this, an agent that
+        // crossed a boundary without spending reads as fully spent — the dashboard draws an
+        // exhausted budget bar for an agent that can spend, and the pending screen's
+        // "monthly cap after" figure is wrong by a whole period.
+        (info.periodStart, info.periodSpend) = _rolled(info.periodStart, info.periodSpend);
     }
 
     /// @inheritdoc IRoster

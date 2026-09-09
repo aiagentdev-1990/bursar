@@ -113,6 +113,10 @@ interface IRoster {
     /// @notice Fixed for every agent on every Roster. See DECISIONS.md 2026-09-09.
     function PERIOD_LENGTH() external view returns (uint256);
     function totalEarmarked() external view returns (uint256);
+    /// @notice Caps, role, active status, current period spend, earmarked balance.
+    /// @dev Reports the period the contract would enforce *right now*: if the boundary has
+    ///      passed since the agent last spent, `periodSpend` reads zero and `periodStart` reads
+    ///      the rolled value, exactly as the next `executeSpend` would set them.
     function getAgent(address agent) external view returns (AgentInfo memory);
     function getPendingRequest(uint256 requestId) external view returns (PendingRequest memory);
 }

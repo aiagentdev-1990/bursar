@@ -74,7 +74,17 @@ Chris runs a one-person business buying and reselling luxury watches. Three agen
 5. Chris reviews and approves it directly from the roster view.
 6. Chris terminates the support agent's access on the spot; its next attempted payment is refused while the other two continue unaffected — proving isolation, not just that revocation works.
 
-UI reference: see the four mockup images in the Claude project (roster overview, pending approval, hire an agent, activity).
+**Roster overview** — the screen Chris sees day to day:
+
+![Roster overview](mockups/1-roster-overview.jpg)
+
+**Pending approval** — the screen that appears the moment the fulfillment agent's $120 request exceeds its cap:
+
+![Pending approval](mockups/2-pending-approval.jpg)
+
+Also in `docs/mockups/`: the hire-an-agent modal and the full activity log. `docs/mockups/README.md`
+transcribes all four and lists five discrepancies between these mockups and this document that need
+resolving before checkpoint 8.
 
 ## 8. Functional requirements
 

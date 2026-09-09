@@ -10,3 +10,6 @@ packages/contracts/cache/
 .env.local
 *.log
 .DS_Store
+
+# stale git temp files this cloud session could not unlink — safe to rm -rf
+_to_delete/

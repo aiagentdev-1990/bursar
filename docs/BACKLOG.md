@@ -58,8 +58,11 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
 ## Day 5 — the surface
 
 - [ ] **8. UI, mocked data**
-  > Hire-agent form, roster overview, pending-approval detail in `apps/web`. Match the four mockups
-  > in the Claude project. Static data first — the layout is the deliverable at this checkpoint.
+  > Hire-agent form, roster overview, pending-approval detail and activity log in `apps/web`.
+  > The four mockups are in `docs/mockups/` — open the JPGs, and read `docs/mockups/README.md` for
+  > the transcribed copy, the design system, and five known discrepancies with the PRD (agent count,
+  > agent names, monthly-vs-period wording, demo cap figures, category-vs-role). Settle those five
+  > before writing components. Static data first — the layout is the deliverable at this checkpoint.
 
 - [ ] **9. Wire overview + activity feed to Blockscout**
   > Replace the mocks. `GET /api/v2/addresses/{contract}/logs`, grouped by agent, budget bars

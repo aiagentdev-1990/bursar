@@ -2,6 +2,8 @@
 
 Read `docs/PRD.md` and `docs/TECH-DESIGN.md` before writing code. They are the spec.
 `docs/BACKLOG.md` is the build order. `docs/DECISIONS.md` is where settled questions go.
+Before any UI work, read `docs/mockups/README.md` — it transcribes the four reference screens and
+lists five unresolved conflicts between them and the PRD.
 
 ## What this is
 
@@ -35,6 +37,7 @@ apps/api/             Node + TypeScript. Owner-authenticated backend (tech desig
                       Talks to Privy, the contract, Claude Managed Agents, Bridge Kit.
 apps/web/             Next.js dashboard. Roster overview, hire form, pending approval, activity.
 docs/                 PRD, tech design, backlog, decisions.
+docs/mockups/         Four UI reference screens (JPG) + README.md transcribing them.
 ```
 
 The contract ABI is the interface between all three. When a contract signature changes, update

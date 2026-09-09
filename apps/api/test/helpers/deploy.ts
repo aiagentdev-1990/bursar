@@ -51,7 +51,9 @@ export async function deployRoster(rpcUrl: string): Promise<Deployment> {
   const chain = defineChain({
     id: ANVIL_CHAIN_ID,
     name: 'Anvil',
-    nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 6 },
+    // The native gas asset is 18-decimal USDC; the ERC-20 predeploy agents spend is
+    // 6-decimal. These are different numbers — see src/chain/chain.ts.
+    nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
     rpcUrls: { default: { http: [rpcUrl] } },
   })
 
@@ -135,5 +137,5 @@ export async function deployRoster(rpcUrl: string): Promise<Deployment> {
   }
 }
 
-/// USDC has 6 decimals. `usdc(120)` is $120.00 in base units.
+/// The ERC-20 USDC agents spend has 6 decimals. `usdc(120)` is $120.00 in base units.
 export const usdc = (whole: number): bigint => BigInt(whole) * 1_000_000n

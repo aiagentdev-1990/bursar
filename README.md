@@ -23,9 +23,13 @@ needed for a specific checkpoint, or not on the critical path yet.
 
 ```bash
 pnpm test                 # everything: contract tests, then api unit + integration
-pnpm contracts:test       # forge — cap math, lazy period reset, isolation, the clone factory
+pnpm contracts:test       # forge — one suite per contract function, 119 tests
 pnpm api:test             # api — unit tests, then integration against a real chain
 ```
+
+Contract tests are organised one file per function, `[Contract]_[Function]_Test.sol`, sharing a
+fixture in `test/base/RosterTestBase.sol`. Tests that assert a revert follow Foundry's
+`test_RevertWhen_[Scenario]` convention, so a suite's failure modes are greppable.
 
 The API integration tests boot a throwaway **anvil** node per file, deploy the real compiled
 contracts to it, and mount the app in-process. Real EVM, real bytecode, real RPC round trips,

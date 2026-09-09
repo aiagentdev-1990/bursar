@@ -7,9 +7,9 @@ import {RosterFactory} from "../src/RosterFactory.sol";
 import {IRoster} from "../src/IRoster.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
 
-/// One Roster is one owner's team. The factory's job is to make that separation real: two teams
-/// share an implementation and nothing else.
-contract RosterFactoryTest is Test {
+/// One Roster is one owner's team. This function's job is to make that separation real: two
+/// teams share an implementation and nothing else.
+contract RosterFactory_CreateRoster_Test is Test {
     MockUSDC internal usdc;
     RosterFactory internal factory;
 
@@ -25,44 +25,22 @@ contract RosterFactoryTest is Test {
         factory = new RosterFactory(address(usdc));
     }
 
-    function test_CreateRosterSetsOwnerAndRecordsIt() public {
+    function test_SetsTheOwnerAndEmits() public {
         vm.expectEmit(false, true, false, false, address(factory));
         emit RosterFactory.RosterCreated(address(0), alice);
 
         address created = factory.createRoster(alice);
 
         assertEq(Roster(created).owner(), alice);
-        assertEq(factory.rosterCount(), 1);
-        address[] memory alices = factory.rostersOf(alice);
-        assertEq(alices.length, 1);
-        assertEq(alices[0], created);
     }
 
-    function test_RostersAreTrackedPerOwner() public {
-        address first = factory.createRoster(alice);
-        address second = factory.createRoster(alice);
-        address bobs = factory.createRoster(bob);
-
-        assertEq(factory.rostersOf(alice).length, 2);
-        assertEq(factory.rostersOf(alice)[0], first);
-        assertEq(factory.rostersOf(alice)[1], second);
-        assertEq(factory.rostersOf(bob).length, 1);
-        assertEq(factory.rostersOf(bob)[0], bobs);
-        assertEq(factory.rosterCount(), 3);
-    }
-
-    function test_CreateRosterRejectsZeroOwner() public {
-        vm.expectRevert(IRoster.ZeroAddress.selector);
-        factory.createRoster(address(0));
-    }
-
-    function test_ClonesAreDistinctAddressesSharingOneImplementation() public {
+    /// A minimal proxy is 45 bytes; the implementation is not. Cheap teams are the whole point.
+    function test_DeploysAMinimalProxyOverTheSharedImplementation() public {
         address first = factory.createRoster(alice);
         address second = factory.createRoster(bob);
 
         assertTrue(first != second);
         assertTrue(first != factory.implementation());
-        // A minimal proxy is 45 bytes; the implementation is not.
         assertEq(first.code.length, 45);
         assertLt(first.code.length, factory.implementation().code.length);
     }
@@ -102,22 +80,6 @@ contract RosterFactoryTest is Test {
         assertTrue(bobs.getAgent(sharedAgent).active);
     }
 
-    /// Alice cannot act on Bob's roster, even though the factory made both.
-    function test_OwnerOfOneRosterHasNoPowerOverAnother() public {
-        Roster alices = Roster(factory.createRoster(alice));
-        Roster bobs = Roster(factory.createRoster(bob));
-
-        vm.prank(bob);
-        bobs.hireAgent(sharedAgent, 10 * USD, 100 * USD, "Bob's agent");
-
-        vm.prank(alice);
-        vm.expectRevert(IRoster.NotOwner.selector);
-        bobs.revokeAgent(sharedAgent);
-
-        assertTrue(bobs.getAgent(sharedAgent).active);
-        assertEq(alices.owner(), alice);
-    }
-
     /// Each clone keeps its own treasury: USDC sent to one is invisible to the other.
     function test_TreasuriesAreSeparate() public {
         Roster alices = Roster(factory.createRoster(alice));
@@ -136,5 +98,40 @@ contract RosterFactoryTest is Test {
         vm.prank(bob);
         vm.expectRevert(IRoster.InsufficientTreasury.selector);
         bobs.fundAgent(sharedAgent, 1);
+    }
+
+    /// The factory is permissionless: the backend calls it on an owner's behalf, and the owner it
+    /// names is the only account that can ever act on the result.
+    function test_AnyoneCanCreateARosterForSomeoneElse() public {
+        vm.prank(bob);
+        address created = factory.createRoster(alice);
+
+        assertEq(Roster(created).owner(), alice);
+
+        vm.prank(bob);
+        vm.expectRevert(IRoster.NotOwner.selector);
+        Roster(created).hireAgent(sharedAgent, 1, 1, "not yours");
+    }
+
+    // ─── reverts ──────────────────────────────────────────────────────────────
+
+    function test_RevertWhen_TheOwnerIsTheZeroAddress() public {
+        vm.expectRevert(IRoster.ZeroAddress.selector);
+        factory.createRoster(address(0));
+    }
+
+    /// Alice cannot act on Bob's roster, even though the factory made both.
+    function test_RevertWhen_AnotherRostersOwnerActsOnThisOne() public {
+        Roster bobs = Roster(factory.createRoster(bob));
+        factory.createRoster(alice);
+
+        vm.prank(bob);
+        bobs.hireAgent(sharedAgent, 10 * USD, 100 * USD, "Bob's agent");
+
+        vm.prank(alice);
+        vm.expectRevert(IRoster.NotOwner.selector);
+        bobs.revokeAgent(sharedAgent);
+
+        assertTrue(bobs.getAgent(sharedAgent).active);
     }
 }

@@ -6,6 +6,10 @@
     "contracts:build": "cd packages/contracts && forge build",
     "contracts:test": "cd packages/contracts && forge test -vv",
     "api:dev": "pnpm --filter @roster/api dev",
-    "web:dev": "pnpm --filter @roster/web dev"
+    "api:test": "pnpm contracts:build && pnpm --filter @roster/api test",
+    "web:dev": "pnpm --filter @roster/web dev",
+    "web:build": "pnpm --filter @roster/web build",
+    "typecheck": "pnpm --filter @roster/api typecheck && pnpm --filter @roster/web typecheck",
+    "test": "pnpm contracts:test && pnpm api:test"
   }
 }

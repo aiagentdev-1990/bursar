@@ -47,6 +47,9 @@ const schema = z.object({
   CLAUDE_ENVIRONMENT_ID: z.string().optional(),
 
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+
+  /// Where services/store.ts keeps operational state. Tests point this at a temp file.
+  ROSTER_STORE_FILE: z.string().optional(),
 })
 
 export type Env = z.infer<typeof schema>

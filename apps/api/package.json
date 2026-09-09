@@ -7,7 +7,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "abi:sync": "node scripts/sync-abi.mjs",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "pnpm test:unit && pnpm test:integration",
+    "test:unit": "node --import tsx --test 'src/**/*.test.ts'",
+    "test:integration": "node --import tsx --test --test-concurrency=1 --test-timeout=180000 'test/**/*.test.ts'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

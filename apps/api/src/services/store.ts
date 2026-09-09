@@ -12,7 +12,8 @@ import { dirname, resolve } from 'node:path'
 /// A JSON file rather than a database because there is nothing here worth the operational
 /// weight of one, and a hackathon demo has to survive a restart, not a shard rebalance.
 
-const FILE = resolve(process.cwd(), '.roster-store.json')
+/// Overridable so the integration tests get a throwaway path instead of the repo root.
+const FILE = process.env.ROSTER_STORE_FILE ?? resolve(process.cwd(), '.roster-store.json')
 
 type Shape = {
   /// role label → Managed Agents agent id + version

@@ -22,13 +22,16 @@ type Notify = (notice: PendingNotice) => void
 /// Returns an unwatch function. viem polls the RPC and re-establishes its filter on its own; the
 /// `onError` hook is here so a dropped connection is visible in the log rather than silently
 /// leaving the roster un-watched.
-export function watchPaymentPending(notify: Notify): () => void {
+export function watchPaymentPending(notify: Notify, options: { pollingIntervalMs?: number } = {}): () => void {
   console.log(`[roster-api] watching ${ROSTER_ADDRESS} for PaymentPending`)
 
   return publicClient.watchContractEvent({
     address: ROSTER_ADDRESS,
     abi: rosterAbi,
     eventName: 'PaymentPending',
+    // Left at viem's default in production; the integration test tightens it so the suite is not
+    // dominated by poll latency.
+    ...(options.pollingIntervalMs ? { pollingInterval: options.pollingIntervalMs } : {}),
     onError: (error) => console.error('[roster-api] PaymentPending watcher error', error),
     onLogs: (logs) => {
       for (const log of logs as Log[]) {

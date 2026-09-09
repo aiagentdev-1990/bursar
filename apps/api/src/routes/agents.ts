@@ -202,6 +202,20 @@ agents.post('/:id/fund', async (c) => {
   return c.json({ agent: toAgentView(address, info, { hasOpenRequest: false }) })
 })
 
+// ─── POST /agents/:id/defund ────────────────────────────────────────────────
+// The counterpart to fund. Without it, revoking a funded agent stranded its remaining budget.
+
+agents.post('/:id/defund', async (c) => {
+  const body = await parse(c, fundBody)
+  const { addresses } = await loadRoster()
+  const address = requireAddress(addresses, c.req.param('id'))
+
+  await contract.defundAgent(address, body.amount)
+
+  const info = await contract.getAgent(address)
+  return c.json({ agent: toAgentView(address, info, { hasOpenRequest: false }) })
+})
+
 // ─── GET /agents/:id/activity (§4.5) ────────────────────────────────────────
 
 agents.get('/:id/activity', async (c) => {

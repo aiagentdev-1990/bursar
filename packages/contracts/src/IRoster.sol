@@ -35,6 +35,8 @@ interface IRoster {
     event RosterInitialized(address indexed owner);
     event AgentRegistered(address indexed agent, uint256 perTxCap, uint256 perPeriodCap, string role);
     event AllowanceFunded(address indexed agent, uint256 amount);
+    event AllowanceDefunded(address indexed agent, uint256 amount);
+    event TreasuryWithdrawn(address indexed to, uint256 amount);
     event SpendExecuted(address indexed agent, address indexed payee, uint256 amount, bytes memo);
     event PaymentPending(
         uint256 indexed requestId, address indexed agent, address indexed payee, uint256 amount, bytes memo
@@ -74,6 +76,15 @@ interface IRoster {
     ///         funding arrives at the Roster address first (Bridge Kit delivers it there), and
     ///         this allocates it. Reverts if the balance can't cover every agent's earmark.
     function fundAgent(address agent, uint256 amount) external;
+
+    /// @notice The counterpart to `fundAgent`: returns an agent's earmark to the unallocated
+    ///         treasury so it can be re-earmarked or withdrawn. Without it, revoking a funded
+    ///         agent would strand its remaining budget permanently.
+    function defundAgent(address agent, uint256 amount) external;
+
+    /// @notice Moves unallocated USDC out of the Roster. Bounded by `balance - totalEarmarked`,
+    ///         so it can never touch USDC an agent is still entitled to.
+    function withdrawTreasury(address to, uint256 amount) external;
 
     /// @notice §4.3 — release a held request's funds to the agent's wallet.
     function approvePending(uint256 requestId) external;

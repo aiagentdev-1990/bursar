@@ -235,6 +235,51 @@ describe('roster api', { skip: available ? false : 'anvil not installed — inst
     assert.match(body.error.message, /Fund it first/)
   })
 
+  // ─── defund and withdraw ──────────────────────────────────────────────────
+
+  it('reports treasury headroom', async () => {
+    const { status, body } = await h.request('GET', '/treasury')
+
+    assert.equal(status, 200)
+    assert.equal(body.treasury.earmarked, usdc(500).toString())
+    assert.equal(body.treasury.unallocated, usdc(500).toString())
+    assert.equal(body.treasury.balance, usdc(1000).toString())
+  })
+
+  it('returns an earmark to the treasury, making it re-earmarkable', async () => {
+    const defunded = await h.request('POST', `/agents/${pricerId}/defund`, {
+      body: { amount: usdc(200).toString() },
+    })
+
+    assert.equal(defunded.status, 200)
+    assert.equal(defunded.body.agent.earmarkedBalance, usdc(300).toString())
+
+    const treasury = await h.request('GET', '/treasury')
+    assert.equal(treasury.body.treasury.unallocated, usdc(700).toString())
+
+    // Put it back, so the rest of the suite runs against the same balances as before.
+    await h.request('POST', `/agents/${pricerId}/fund`, { body: { amount: usdc(200).toString() } })
+  })
+
+  it('withdraws unallocated USDC to the owner, and refuses to touch an earmark', async () => {
+    const withdrawn = await h.request('POST', '/treasury/withdraw', {
+      body: { amount: usdc(100).toString() },
+    })
+
+    assert.equal(withdrawn.status, 200)
+    assert.equal(withdrawn.body.unallocated, usdc(400).toString())
+
+    const tooMuch = await h.request('POST', '/treasury/withdraw', {
+      body: { amount: usdc(500).toString() },
+    })
+    assert.equal(tooMuch.status, 400)
+    assert.equal(tooMuch.body.error.code, 'InsufficientTreasury')
+
+    // The earmark is intact, so the agent can still spend.
+    const agent = await h.request('GET', `/agents/${pricerId}`)
+    assert.equal(agent.body.agent.earmarkedBalance, usdc(500).toString())
+  })
+
   // ─── the over-cap path (§4.3) ─────────────────────────────────────────────
 
   it('holds an over-cap spend as pending, moving no funds', async () => {

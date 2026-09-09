@@ -2,6 +2,27 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-09 — §5 amendment: funds must be able to leave the Roster
+Found by auditing the contract. `fundAgent` had no counterpart, and the Roster had no exit at
+all, so two things were permanently locked:
+
+- USDC delivered to the Roster but never earmarked. §4.6's whole funding rail delivers to this
+  address, so any over-delivery was stuck. Measured on the test fixture: 8,000 of 10,000 USDC
+  unreachable.
+- A revoked agent's remaining earmark. Revoking an agent left its budget assigned to a dead
+  agent, still counted in `totalEarmarked`, usable by nobody. That made the kill switch — the
+  action the whole product is built around — cost the owner real money to pull.
+
+`defundAgent(agent, amount)` and `withdrawTreasury(to, amount)` are added to §5. Both are
+`onlyOwner`. The invariant they preserve is `USDC.balanceOf(roster) >= totalEarmarked`: an
+agent always keeps what it was promised, and only the surplus can leave. `withdrawTreasury`
+is bounded by `balance - totalEarmarked` and reverts otherwise, so it cannot take an earmark
+out from under a working agent.
+
+This is a deliberate departure from CLAUDE.md's "do not add any function not in §5" — the rule
+exists to keep the enforcement surface small, and neither function touches a cap, a period, or
+the pending queue. §5 has been updated so the two documents agree.
+
 ## 2026-09-09 — Contract shape: fixed period, no sweep, one Roster per team
 Three changes settled while building checkpoint 1. Each closes an open item above.
 

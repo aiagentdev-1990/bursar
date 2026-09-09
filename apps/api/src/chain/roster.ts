@@ -1,6 +1,7 @@
 import type { Address, Hash } from 'viem'
 import { rosterAbi } from './abi.js'
 import { publicClient, ownerClient, ownerAccount, ROSTER_ADDRESS } from './chain.js'
+import { loadEnv } from '../env.js'
 
 /// Typed wrappers over the Allowance Contract. Every write simulates first: the simulation is
 /// what turns a revert into a decodable custom error (`InsufficientTreasury`, `AgentNotActive`,
@@ -66,6 +67,35 @@ export async function getPeriodLength(): Promise<bigint> {
   return publicClient.readContract({ ...base, functionName: 'PERIOD_LENGTH' })
 }
 
+export async function getTotalEarmarked(): Promise<bigint> {
+  return publicClient.readContract({ ...base, functionName: 'totalEarmarked' })
+}
+
+/// USDC the Roster holds that no agent is entitled to — what `withdrawTreasury` is bounded by,
+/// and the headroom `fundAgent` has left.
+export async function getUnallocatedTreasury(): Promise<bigint> {
+  const [balance, earmarked] = await Promise.all([
+    publicClient.readContract({
+      address: loadEnv().USDC_ADDRESS,
+      abi: erc20BalanceOfAbi,
+      functionName: 'balanceOf',
+      args: [ROSTER_ADDRESS],
+    }),
+    getTotalEarmarked(),
+  ])
+  return balance - earmarked
+}
+
+const erc20BalanceOfAbi = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
 // ─── writes ─────────────────────────────────────────────────────────────────
 
 type WriteArgs = Parameters<typeof publicClient.simulateContract>[0]
@@ -90,6 +120,10 @@ export const hireAgent = (agent: Address, perTxCap: bigint, perPeriodCap: bigint
   send('hireAgent', [agent, perTxCap, perPeriodCap, role])
 
 export const fundAgent = (agent: Address, amount: bigint) => send('fundAgent', [agent, amount])
+
+export const defundAgent = (agent: Address, amount: bigint) => send('defundAgent', [agent, amount])
+
+export const withdrawTreasury = (to: Address, amount: bigint) => send('withdrawTreasury', [to, amount])
 
 export const updateCaps = (agent: Address, perTxCap: bigint, perPeriodCap: bigint) =>
   send('updateCaps', [agent, perTxCap, perPeriodCap])

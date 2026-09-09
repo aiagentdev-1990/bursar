@@ -115,6 +115,35 @@ contract Roster is IRoster {
     }
 
     /// @inheritdoc IRoster
+    function defundAgent(address agent, uint256 amount) external onlyOwner {
+        AgentInfo storage info = _agents[agent];
+        if (!info.registered) revert UnknownAgent();
+        if (info.earmarkedBalance < amount) revert InsufficientEarmarkedBalance();
+
+        // Mirror of fundAgent: no tokens move, the allocation is just released back into the
+        // unallocated pool. Deliberately allowed for a revoked agent — that is the case it
+        // exists for.
+        info.earmarkedBalance -= amount;
+        totalEarmarked -= amount;
+
+        emit AllowanceDefunded(agent, amount);
+    }
+
+    /// @inheritdoc IRoster
+    function withdrawTreasury(address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert ZeroAddress();
+
+        // Only what no agent is entitled to. An agent's earmark is a promise this function
+        // cannot break, which is what keeps `balance >= totalEarmarked` an invariant.
+        uint256 unallocated = USDC.balanceOf(address(this)) - totalEarmarked;
+        if (unallocated < amount) revert InsufficientTreasury();
+
+        USDC.safeTransfer(to, amount);
+
+        emit TreasuryWithdrawn(to, amount);
+    }
+
+    /// @inheritdoc IRoster
     function updateCaps(address agent, uint256 newPerTxCap, uint256 newPerPeriodCap) external onlyOwner {
         AgentInfo storage info = _agents[agent];
         if (!info.registered) revert UnknownAgent();

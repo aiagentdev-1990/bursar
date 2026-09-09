@@ -25,6 +25,7 @@ import { onError } from './http/errors.js'
 import { requireOwner } from './http/auth.js'
 import { agents, nameLookup } from './routes/agents.js'
 import { pending } from './routes/pending.js'
+import { treasury } from './routes/treasury.js'
 import { fetchRosterEvents, agentAddressesFrom } from './services/blockscout.js'
 import { toActivityView } from './services/view.js'
 import * as contract from './chain/roster.js'
@@ -46,10 +47,13 @@ export function createApp() {
 
   app.use('/agents/*', requireOwner)
   app.use('/pending/*', requireOwner)
+  app.use('/treasury', requireOwner)
+  app.use('/treasury/*', requireOwner)
   app.use('/activity', requireOwner)
 
   app.route('/agents', agents)
   app.route('/pending', pending)
+  app.route('/treasury', treasury)
 
   app.get('/activity', async (c) => {
     const events = await fetchRosterEvents()

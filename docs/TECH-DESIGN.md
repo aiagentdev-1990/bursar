@@ -245,6 +245,8 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 | `initialize(address owner)` | Once, by the factory | Sets the owner. Replaces a constructor, which a minimal proxy cannot run. |
 | `fundAgent(address agent, uint256 amount)` | `onlyOwner` | Earmarks USDC the Roster **already holds** for that agent. Moves no tokens. Reverts if the balance can't cover every earmark. §4.6 |
 | `executeSpend(uint256 amount, address payee, bytes calldata memo) returns (bool executed, uint256 requestId)` | `onlyAgent` | Checks both caps. If satisfied, transfers `amount` to the agent's own wallet and returns `executed = true`. If not, opens a pending request. §4.2, §4.3 |
+| `defundAgent(address agent, uint256 amount)` | `onlyOwner` | Returns an agent's earmark to the unallocated treasury. Counterpart to `fundAgent`. |
+| `withdrawTreasury(address to, uint256 amount)` | `onlyOwner` | Moves unallocated USDC out. Bounded by `balance - totalEarmarked`, so it can never touch an earmark. |
 | `approvePending(uint256 requestId)` | `onlyOwner` | Releases a held request's funds. §4.3 |
 | `rejectPending(uint256 requestId)` | `onlyOwner` | Closes a held request with no funds moved. §4.3 |
 | `revokeAgent(address agent)` | `onlyOwner` | Sets that agent's `active` flag false. Touches only that agent's record. §4.4 |
@@ -254,6 +256,13 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 | `owner() / PERIOD_LENGTH() / totalEarmarked()` | Public | Owner, the fixed 30-day period, and the sum of every agent's earmark. |
 
 **Note on period resets:** no `resetPeriod` function. `executeSpend` computes whether the current timestamp has crossed the agent's period boundary since its last recorded reset, and if so zeroes the period-spend counter before checking the cap. The period is a fixed `PERIOD_LENGTH = 30 days` for every agent on every Roster, not a per-agent field — see DECISIONS.md 2026-09-09. `periodStart` advances by whole periods, so an agent that goes quiet for three months does not get a fresh period beginning the moment it wakes up.
+
+**Note on getting funds back out (added 2026-09-09).** `fundAgent` alone made an earmark a
+one-way door: USDC delivered to the Roster but never earmarked was locked in it forever, and
+revoking a funded agent stranded that agent's remaining budget permanently — which made the kill
+switch cost real money. `defundAgent` and `withdrawTreasury` close both. The invariant they
+preserve is `USDC.balanceOf(roster) >= totalEarmarked`: an agent always keeps what it was
+promised, and only the surplus can leave.
 
 **Note on `sweepUnspent`:** removed. It needed an ERC-20 allowance from the agent's wallet to the contract that §4.1's onboarding never established. Nothing reclaims released-but-unspent USDC today; the exposure is bounded to a single request by the point-of-use release in §4.2, which is what made the sweep optional in the first place. See DECISIONS.md 2026-09-09.
 
@@ -286,6 +295,10 @@ Owner-authenticated only. Agents never call these; an agent's payment tool talks
 | `GET /pending` | All pending approval requests. |
 | `POST /pending/{requestId}/approve` | Calls `approvePending`, then sends the Claude session event. §4.3 |
 | `POST /pending/{requestId}/reject` | Calls `rejectPending`. |
+| `POST /agents/{id}/fund` | One-off `fundAgent`. §4.6 |
+| `POST /agents/{id}/defund` | Calls `defundAgent`. |
+| `GET /treasury` | Earmarked, unallocated, and total balance. |
+| `POST /treasury/withdraw` | Calls `withdrawTreasury`, always to the roster's owner. |
 | `POST /agents/{id}/funding-schedule` | Recurring payroll top-up via Bridge Kit. §4.6 |
 
 **Not an endpoint but backend infrastructure:** a persistent listener on the contract's event stream watching for `PaymentPending`.

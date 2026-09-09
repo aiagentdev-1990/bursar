@@ -99,25 +99,26 @@ address" requirement showing up in the UI.
 
 ---
 
-## Discrepancies with the PRD — resolve before building
+## Discrepancies with the PRD — **all five resolved 2026-09-09**
 
-These are real conflicts, not stylistic drift. Pick one side and update the other document.
+See `docs/DECISIONS.md` for the resolutions and the reasoning; PRD §7 has been updated to match.
+Kept below as the record of what the conflict was.
 
-1. **Agent count.** The mockups show **five** agents (Pricer, Concierge, Runner, Scout, Ledger).
+1. ~~**Agent count.**~~ *Resolved: five on the roster, three driven live.* The mockups show **five** agents (Pricer, Concierge, Runner, Scout, Ledger).
    PRD §7's demo narrative has **three**, and open question 3 asks whether even three is one too
    many for a live demo. Five is almost certainly a mockup-realism choice, not a spec.
-2. **Agent names.** Mockups use product names (Pricer, Concierge, Runner, Scout, Ledger); the PRD
+2. ~~**Agent names.**~~ *Resolved: mockup names.* Mockups use product names (Pricer, Concierge, Runner, Scout, Ledger); the PRD
    uses functional descriptions (pricing agent, support agent, fulfillment agent). Roughly:
    Pricer ≈ pricing, Concierge ≈ support, Runner ≈ fulfillment. Scout and Ledger have no PRD
    counterpart at all. The mockup names are better — use them.
-3. **Period wording.** The UI says "Monthly cap" and "September cap" throughout; the contract's
+3. ~~**Period wording.**~~ *Resolved: monthly — `periodLength` is fixed at 30 days, a constraint on checkpoint 1.* The UI says "Monthly cap" and "September cap" throughout; the contract's
    field is `perPeriodCap` with a configurable `periodLength`, and the PRD demo uses **weekly**
    caps ($100/week, $50/week, $400/week). Either set `periodLength` to a month for the demo, or
    change the UI copy to "period". Do not let the UI imply a boundary the contract isn't enforcing.
-4. **Demo numbers.** Mockup caps (Pricer $400, Concierge $150, Runner $75/$900) differ from PRD
+4. ~~**Demo numbers.**~~ *Resolved: mockup figures; Scout $500 and Ledger $300 chosen so the derived totals balance.* Mockup caps (Pricer $400, Concierge $150, Runner $75/$900) differ from PRD
    §7's ($10/$100, $5/$50, $75/$400). The $120 over-cap moment against a $75 per-transaction limit
    is consistent across both — that beat is settled; the surrounding figures aren't.
-5. **Category vs role.** The table has a `CATEGORY` column (Data & research, Messaging,
+5. ~~**Category vs role.**~~ *Resolved: derived from role in the UI (`apps/web/lib/categories.ts`); the contract stays single-field.* The table has a `CATEGORY` column (Data & research, Messaging,
    Authentication, Sourcing) *and* a role description under each agent name. The contract carries
    one `role` string. Either category is derived from role, or the backend stores a second field
    the contract doesn't know about — decide which.

@@ -64,15 +64,17 @@ Crypto-only for this build, by decision. A fiat version requires a bank or card 
 
 Chris runs a one-person business buying and reselling luxury watches. Three agents handle it.
 
-1. Owner "hires" three agents onto the roster:
-   - a **pricing agent** ($10/txn, $100/week, role "market research") — comparable listings via **Brave Search** and **Exa**.
-   - a **support agent** ($5/txn, $50/week, role "buyer support") — routine buyer questions via **Groq**.
-   - a **fulfillment agent** ($75/txn, $400/week, role "authentication & logistics") — hires real people for one-off tasks via **molty.cash**.
-2. All three appear on the roster dashboard with role, budget, and status.
+1. Owner "hires" three agents onto the roster (caps are monthly — see DECISIONS.md 2026-09-09):
+   - **Pricer** ($10/txn, $400/month, role "Comparable-listing research") — comparable listings via **Brave Search** and **Exa**.
+   - **Concierge** ($25/txn, $150/month, role "Buyer questions and offers") — routine buyer questions via **Groq**.
+   - **Runner** ($75/txn, $900/month, role "One-off task payouts") — hires real people for one-off tasks via **molty.cash**.
+2. All three appear on the roster dashboard with role, budget, and status, alongside **Scout** and
+   **Ledger** — two already-active agents that make the screen read as a roster but are never
+   driven on stage.
 3. The pricing and support agents make several small autonomous payments, visible live.
 4. The fulfillment agent tries to hire an authenticator for a $120 pre-purchase inspection — over its per-transaction cap. It holds pending, flagged with what it's for and who it would pay.
 5. Chris reviews and approves it directly from the roster view.
-6. Chris terminates the support agent's access on the spot; its next attempted payment is refused while the other two continue unaffected — proving isolation, not just that revocation works.
+6. Chris terminates Concierge's access on the spot; its next attempted payment is refused while the other two continue unaffected — proving isolation, not just that revocation works.
 
 **Roster overview** — the screen Chris sees day to day:
 
@@ -171,5 +173,5 @@ Arc's three tracks are alternatives within one slot, not stacked — realistical
 
 1. Does Circle's Agent Stack have a testnet-ready SDK on Arc today, or does Agentic Economy eligibility only require the *shape* of the flow?
 2. What does "agent identity" mean for the demo — a plain address, or ERC-8004?
-3. Is three agents right for the demo, or does two make the isolation point with less live risk?
+3. ~~Is three agents right for the demo?~~ Settled 2026-09-09: five on the roster, three driven live.
 4. Does "payroll" make the demo meaningfully better, or is it the metaphor being cute? If it doesn't change what the demo proves, cut it.

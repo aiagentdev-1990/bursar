@@ -57,7 +57,8 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
 
 ## Day 5 — the surface
 
-- [ ] **8. UI, mocked data**
+- [x] **8. UI, mocked data** — landed 2026-09-09. `apps/web`, Next.js App Router, four screens.
+      All five discrepancies settled first; see DECISIONS.md 2026-09-09.
   > Hire-agent form, roster overview, pending-approval detail and activity log in `apps/web`.
   > The four mockups are in `docs/mockups/` — open the JPGs, and read `docs/mockups/README.md` for
   > the transcribed copy, the design system, and five known discrepancies with the PRD (agent count,

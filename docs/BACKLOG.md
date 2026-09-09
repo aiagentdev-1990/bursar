@@ -50,11 +50,15 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
   > x402 request. The failure branch — released but not spent — currently strands the USDC in the
   > agent's wallet; there is no sweep. Log it clearly rather than pretending it reconciles.
 
-- [ ] **6. Backend endpoints**
+- [x] **6. Backend endpoints** — landed 2026-09-09. All of §6 in `apps/api`, verified end-to-end
+      against a local anvil node with the real contract. Privy (3) and Managed Agents (4) sit
+      behind interfaces and fail loudly when unconfigured rather than silently.
   > All of TECH-DESIGN.md §6 in `apps/api`. Owner-authenticated only — agents never call these.
   > The backend never holds funds and never signs on an agent's behalf; it only orchestrates.
 
-- [ ] **7. `PaymentPending` listener + two-step approve**
+- [x] **7. `PaymentPending` listener + two-step approve** — landed 2026-09-09 alongside 6.
+      Approval waits for the receipt before the session event; it is never inferred from
+      `SpendExecuted`.
   > A persistent contract event listener (not an endpoint). On owner approval: call
   > `approvePending`, confirm it succeeded, *then* send the Claude session-resume event. Do not
   > infer approvals from the `SpendExecuted` stream — §4.2's ordinary path fires it too.

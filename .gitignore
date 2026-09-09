@@ -14,3 +14,7 @@ packages/contracts/cache/
 # stale git temp files this cloud session could not unlink — safe to rm -rf
 _to_delete/
 *.tsbuildinfo
+
+# Operational state written by apps/api (Claude session ids, and dev-only agent keys when
+# WALLET_PROVIDER=local). Never commit it — it can contain private keys.
+.roster-store.json

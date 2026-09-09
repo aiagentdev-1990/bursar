@@ -14,15 +14,20 @@ import {IRoster} from "./IRoster.sol";
 ///         that the contract is the single point of enforcement and therefore the single point
 ///         of failure; an upgrade path would add a second way for the guarantee to fail — one an
 ///         owner could not audit by reading the code their agents are bound to.
+///
+///         The factory keeps no registry. `createRoster` is permissionless by necessity — the
+///         backend deploys on an owner's behalf during onboarding, so the caller is not the
+///         owner — which means any on-chain list keyed by owner could be filled with entries
+///         nobody asked for, by anyone, unboundedly. `RosterCreated` carries `owner` and
+///         `creator` as indexed topics instead, so a reader can filter to the deployments it
+///         actually trusts. Nothing is stored that an attacker can grow.
 contract RosterFactory {
     /// @notice The Roster implementation every clone delegatecalls into. Locked at construction.
     address public immutable implementation;
 
-    /// @notice Every Roster this factory has deployed, oldest first.
-    address[] private _rosters;
-    mapping(address => address[]) private _rostersOf;
-
-    event RosterCreated(address indexed roster, address indexed owner);
+    /// @param creator The account that paid for the deployment. Not the owner — filter on this
+    ///        to ignore rosters attached to an owner by someone they don't trust.
+    event RosterCreated(address indexed roster, address indexed owner, address indexed creator);
 
     constructor(address usdc) {
         // Constructing the implementation here means it can never be left uninitialized: its
@@ -39,22 +44,6 @@ contract RosterFactory {
         roster = Clones.clone(implementation);
         Roster(roster).initialize(owner);
 
-        _rosters.push(roster);
-        _rostersOf[owner].push(roster);
-
-        emit RosterCreated(roster, owner);
-    }
-
-    /// @notice Every Roster owned by `owner`, oldest first.
-    function rostersOf(address owner) external view returns (address[] memory) {
-        return _rostersOf[owner];
-    }
-
-    function rosterCount() external view returns (uint256) {
-        return _rosters.length;
-    }
-
-    function rosterAt(uint256 index) external view returns (address) {
-        return _rosters[index];
+        emit RosterCreated(roster, owner, msg.sender);
     }
 }

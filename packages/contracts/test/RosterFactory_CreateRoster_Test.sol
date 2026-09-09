@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {Roster} from "../src/Roster.sol";
 import {RosterFactory} from "../src/RosterFactory.sol";
 import {IRoster} from "../src/IRoster.sol";
@@ -26,12 +26,44 @@ contract RosterFactory_CreateRoster_Test is Test {
     }
 
     function test_SetsTheOwnerAndEmits() public {
-        vm.expectEmit(false, true, false, false, address(factory));
-        emit RosterFactory.RosterCreated(address(0), alice);
+        vm.expectEmit(false, true, true, false, address(factory));
+        emit RosterFactory.RosterCreated(address(0), alice, address(this));
 
         address created = factory.createRoster(alice);
 
         assertEq(Roster(created).owner(), alice);
+    }
+
+    /// The event records who paid as well as who owns, so a reader can ignore rosters attached
+    /// to an owner by an account it does not trust. That attribution is what replaces the
+    /// on-chain per-owner index, which anyone could have filled unboundedly.
+    function test_TheEventRecordsTheCreatorSeparatelyFromTheOwner() public {
+        vm.recordLogs();
+
+        vm.prank(bob);
+        factory.createRoster(alice);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        Vm.Log memory created = logs[logs.length - 1];
+
+        assertEq(created.topics[0], keccak256("RosterCreated(address,address,address)"));
+        assertEq(address(uint160(uint256(created.topics[2]))), alice, "owner");
+        assertEq(address(uint160(uint256(created.topics[3]))), bob, "creator");
+    }
+
+    /// The factory stores nothing an attacker can grow. Creating rosters for someone else costs
+    /// the attacker gas and leaves the victim with no state to read, no list to page through,
+    /// and nothing that can become too large to query.
+    function test_KeepsNoRegistryAnAttackerCanGrow() public {
+        vm.startPrank(bob);
+        for (uint256 i = 0; i < 25; i++) {
+            factory.createRoster(alice);
+        }
+        vm.stopPrank();
+
+        // Alice's own roster is unaffected, and there is no per-owner array to have polluted.
+        address alices = factory.createRoster(alice);
+        assertEq(Roster(alices).owner(), alice);
     }
 
     /// A minimal proxy is 45 bytes; the implementation is not. Cheap teams are the whole point.

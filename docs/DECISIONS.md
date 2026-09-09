@@ -2,6 +2,25 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-09 — RosterFactory keeps no on-chain registry
+Found by auditing the contract. `createRoster(owner)` indexed each deployment into
+`_rostersOf[owner]`, but creation is permissionless by necessity: the backend deploys on an
+owner's behalf during onboarding, so `msg.sender` is never the owner. That meant anyone could
+attach unlimited rosters to any address — confirmed by pushing 50 onto a victim in a test — until
+`rostersOf(victim)` was too large to read, and with attacker-created entries showing in any "your
+teams" view.
+
+Requiring `msg.sender == owner` would have fixed it and broken the actual flow. So the registry
+is gone entirely: `_rostersOf`, `rostersOf`, `rosterCount` and `rosterAt` are removed, and
+`RosterCreated` now carries `roster`, `owner` and `creator` as three indexed topics. A reader
+filters by the creator it trusts.
+
+Note this does not make the *pollution* impossible — anyone can still emit the event by calling
+`createRoster` for someone else. It makes it unattributable-to-you rather than
+stored-against-you: nothing grows in the contract, no read can be made to fail, and the creator
+topic is enough to filter. Nothing depended on the index; the backend already learns its Roster
+address from the deployment receipt and holds it in `ROSTER_CONTRACT_ADDRESS`.
+
 ## 2026-09-09 — `getAgent` reports the period the contract would enforce
 Found by auditing the contract. `getAgent` returned raw storage, and `periodSpend` is only
 zeroed inside `executeSpend`/`approvePending`. So between a period boundary and the agent's next

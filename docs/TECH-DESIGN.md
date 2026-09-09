@@ -274,7 +274,13 @@ A Roster is one owner's team. `RosterFactory.createRoster(owner)` deploys each o
 |---|---|
 | `createRoster(address owner) returns (address)` | Deploy and initialize a Roster owned by `owner`. Permissionless. |
 | `implementation()` | The shared Roster implementation. Locked at factory construction. |
-| `rostersOf(address owner) / rosterCount() / rosterAt(uint256)` | Enumeration for the dashboard. |
+
+**The factory keeps no registry (revised 2026-09-09).** It originally indexed rosters by owner.
+But `createRoster` has to be permissionless — the backend deploys on an owner's behalf during
+onboarding, so the caller is never the owner — which meant anyone could fill any address's list
+with entries nobody asked for, unboundedly, until it was too large to read. `RosterCreated`
+carries `roster`, `owner` and `creator` as indexed topics instead, so a reader filters to the
+deployments it trusts. Nothing is stored that an attacker can grow.
 
 **Deliberately not upgradeable.** The clones delegatecall a fixed implementation and no admin can swap it. R4 is that the contract is the single point of enforcement and therefore the single point of failure; an upgrade path adds a second way for the guarantee to fail — one an owner cannot audit by reading the code their agents are bound to.
 

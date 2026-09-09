@@ -73,41 +73,126 @@ Five components own the system's behaviour:
 
 ### 4.1 Agent onboarding ("hire an agent")
 
-Four-resource setup — **Agent** (behaviour: model, system prompt, tools, MCP servers, skills), **Environment** (the sandbox it runs in), **Vault** (credentials for any authenticated tool), and **Session** (the actual running instance) — plus the Privy wallet and Allowance Contract registration. All Managed Agents calls require the `managed-agents-2026-04-01` beta header and standard `x-api-key`/`anthropic-version` headers.
+Hiring provisions four things: a **wallet** (Privy), an **on-chain identity** (ERC-8004), an
+**allowance** (the Allowance Contract), and a **running instance** (Claude Managed Agents —
+Agent config, Environment, optional Vault, Session).
+
+#### What lives where, and why
+
+Each system owns exactly one thing, and nothing is stored twice.
+
+| Fact | Home | Why there |
+|---|---|---|
+| Both caps, period spend, period start, active flag | **Allowance Contract** | Enforcement. Nothing else may hold these. |
+| Earmarked balance, treasury | **Allowance Contract** | It is the treasury. |
+| Agent **name** and **role** | **ERC-8004 metadata** | Display and discovery. Neither is read by any enforcement path. |
+| Identity ↔ wallet binding | **ERC-8004** (`getAgentWallet`) | That is precisely what the registry is for. |
+| `agentId` | **Nowhere, twice** | Derivable from the registry's own `Registered` / `MetadataSet` events. The backend caches it; the cache is disposable. |
+| Claude `session_id` | **Backend store** | Not derivable from any chain. |
+
+**What this offloads from the Allowance Contract.** `AgentInfo.role` was always a passenger — the
+interface itself called it "dashboard label only — no enforcement depends on it". It was there
+because the dashboard needed a label and there was nowhere else to put it. ERC-8004 metadata *is*
+that somewhere else, and it is the place other tools already look. Removing it means:
+
+- `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap)` — no string argument, so a
+  hire stops paying for a dynamic-length SSTORE in the enforcement contract.
+- `AgentInfo` loses its only non-enforcement field. Everything left in that struct is load-bearing.
+- The `"Name|Role"` delimiter hack disappears, and with it `apps/api/src/services/labels.ts`.
+  That hack existed only because the contract had one string and the form collected two fields.
+  It was a compromise recorded as such; ERC-8004 removes the need for it rather than tidying it.
+
+**The cost, stated plainly.** This makes ERC-8004 *required* for a complete hire rather than a
+nice-to-have badge. An agent whose identity registration fails has no name to render. Two extra
+transactions per hire. And the registry is an external, upgradeable contract we do not control.
+That is the trade being made: one less field in the contract that matters most, in exchange for a
+dependency in the flow that matters least.
+
+#### The order, and why it is that order
+
+The invariant is: **an agent that can spend always has enforced caps.** `hireAgent` is what brings
+an agent into existence, so nothing that moves money may precede it, and funding must follow it.
+
+Identity is provisioned *before* `hireAgent` because its output (the name and role) is part of what
+makes a hire complete, and because failing early is clean: a registration that succeeds while
+`hireAgent` fails leaves an identity NFT bound to a wallet that is on no roster, holds nothing, and
+cannot spend — harmless, and reusable on retry.
 
 ```mermaid
 sequenceDiagram
-    participant Owner
+    autonumber
+    actor Owner
     participant Backend as Roster Backend
     participant Privy
+    participant Wallet as Agent wallet<br/>(signs only — never funded with gas)
+    participant Registry as ERC-8004<br/>IdentityRegistry
     participant Contract as Allowance Contract (Arc)
-    participant Claude as Claude Managed Agents API
-    participant Vault as Claude Vault
+    participant Claude as Claude Managed Agents
 
     Owner->>Backend: Hire agent (name, role, perTxCap, perPeriodCap)
+
     Backend->>Privy: Create embedded wallet
-    Privy-->>Backend: Wallet address
+    Privy-->>Backend: Agent wallet address
 
-    Backend->>Contract: hireAgent(address, perTxCap, perPeriodCap, role)
-    Contract-->>Backend: AgentRegistered event
-
-    alt this role's Agent config doesn't exist yet
-        Backend->>Claude: POST /v1/agents (model, system_prompt, tools, mcp_servers, skills)
-        Claude-->>Backend: agent_id (versioned, reusable for future hires of this role)
+    rect rgb(24, 34, 30)
+        Note over Backend,Registry: Identity. Fails clean — no agent exists yet.
+        Backend->>Registry: register(agentURI) — name + role, as the owner
+        Registry-->>Backend: Registered(agentId, agentURI, owner)
+        Backend->>Wallet: Sign EIP-712 AgentWalletSet<br/>(agentId, newWallet, owner, deadline)
+        Wallet-->>Backend: signature — no transaction, no gas
+        Backend->>Registry: setAgentWallet(agentId, wallet, deadline, signature)
+        Registry-->>Backend: getAgentWallet(agentId) → the agent's wallet
     end
 
-    Backend->>Claude: POST /v1/environments (sandbox config)
-    Claude-->>Backend: environment_id
+    rect rgb(28, 32, 46)
+        Note over Backend,Contract: The agent comes into existence here, already capped.
+        Backend->>Contract: hireAgent(wallet, perTxCap, perPeriodCap)
+        Contract-->>Backend: AgentRegistered — caps enforced from this block
+        opt opening earmark requested
+            Backend->>Contract: fundAgent(wallet, amount)
+        end
+    end
 
-    Backend->>Vault: Store x402-payment-tool credential, scoped to this agent's wallet
-    Vault-->>Backend: vault_id
+    rect rgb(34, 30, 24)
+        Note over Backend,Claude: Best effort. A hire that cannot start is still a capped agent.
+        alt this role's Agent config doesn't exist yet
+            Backend->>Claude: POST /v1/agents (model, system, tools)
+            Claude-->>Backend: agent_id — versioned, reused by every future hire of this role
+        end
+        Backend->>Claude: POST /v1/sessions (agent_id, environment_id)
+        Claude-->>Backend: session_id — provisioned, idle
+        Backend->>Claude: POST /v1/sessions/{id}/events — "start working"
+    end
 
-    Backend->>Claude: POST /v1/sessions (agent_id, environment_id, vault_ids, budget)
-    Claude-->>Backend: session_id — provisioned, idle
-
-    Backend->>Claude: POST /v1/sessions/{id}/events (initial user event — "start working")
-    Backend-->>Owner: Agent hired and running
+    Backend-->>Owner: Agent hired, capped, and running
 ```
+
+#### Why the owner holds the identity, and the agent only signs
+
+`register` mints to `msg.sender`, and `setAgentWallet` requires `msg.sender == ownerOf(agentId)`.
+If the agent owned its own identity it would have to send both transactions itself — which means
+funding a brand-new wallet with gas before it has done anything, on a chain where gas is USDC.
+
+So the owner holds the NFT and the agent's wallet is *bound* to it. The agent signs one EIP-712
+message and never sends a transaction. `getAgentWallet(agentId)` resolves the identity to the
+spending address, which is what an outside verifier actually wants to know. It also matches the
+product: the owner hires and fires, so the owner holds the credential.
+
+The signed struct is `AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256
+deadline)` under domain `{name: "ERC8004IdentityRegistry", version: "1", chainId: 5042002,
+verifyingContract: <registry>}`. The registry accepts an ECDSA signature or an ERC-1271 one, so a
+Privy smart wallet works as well as an EOA. `deadline` must be within five minutes.
+
+#### ERC-8004 does not gate spending
+
+`onlyAgent` stays a plain-address check. Resolving identity through the registry inside
+`executeSpend` would put an external, upgradeable contract in the enforcement path — a second way
+for the guarantee to fail, inside the thing that *is* the guarantee (risk R4). Identity is
+provenance, not authorization.
+
+This settles open question 2, and it settles it as "both": the allowance binds to a plain address,
+and the agent additionally has an ERC-8004 identity that resolves to that address. Neither depends
+on the other at execution time.
 
 **Why Agent and Environment are separate from Session:** Agent and Environment are versioned, reusable resources — a "Pricing research agent" role only needs to be defined once, then every hire of that role reuses the same `agent_id`. A Session is the actual running instance tied to one specific hire: one wallet, one allowance, one vault credential.
 
@@ -116,6 +201,18 @@ sequenceDiagram
 **Creating a session doesn't start work.** The backend still has to send a user event (or pass `initial_events`) to kick the agent into motion.
 
 The owner never sees a wallet address or an agent ID. `hireAgent` is `onlyOwner`; the caller's identity is checked against the roster's owner, not against the new agent.
+
+#### Addresses (Arc testnet), verified on-chain
+
+| What | Address |
+|---|---|
+| IdentityRegistry (ERC-1967 proxy) | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
+| └ implementation `IdentityRegistryUpgradeable` | `0x7274e874CA62410a93Bd8bf61c69d8045E399c02` |
+| ReputationRegistry | `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
+| ValidationRegistry | `0x8004Cb1BF31DAf7788923b405b754f57acEB4272` |
+
+Only the IdentityRegistry is used. Reputation and Validation are out of scope — Roster does not
+score an agent's output quality (PRD §9 excludes it explicitly).
 
 ### 4.2 Autonomous payment, within cap
 
@@ -240,7 +337,12 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 
 ## Open technical questions
 
-1. Does Circle's Agent Stack expose a testnet-ready SDK on Arc, or does §4.2's facilitator interaction need to be built against the raw x402 spec directly?
+0. **Awaiting a decision:** move agent name and role out of the Allowance Contract into ERC-8004
+   metadata, per §4.1's "what lives where". It removes the only non-enforcement field from
+   `AgentInfo`, removes the `"Name|Role"` delimiter hack, and shortens `hireAgent` — at the cost of
+   making ERC-8004 a required step in the hire flow rather than an optional badge. §4.1 is written
+   as though this is settled; §5 still lists the shipped signature. One of the two has to change.
+1. Does Circle's Agent Stack expose a testnet-ready SDK on Arc, or does §4.2's facilitator interaction need to be built against the raw x402 spec directly? *(Answered 2026-09-09: yes — `@circle-fin/x402-batching` v2 with `GatewayClient` / `BatchFacilitatorClient`. See the Gateway custody conflict noted against §4.2.)*
 2. Does `executeSpend`'s `onlyAgent` check bind to a plain contract address, or does agent identity need to resolve through ERC-8004? *(Implemented as a plain address; ERC-8004 is on the backlog's cut list and nothing in the contract assumes either answer.)*
 
 ## 5. Smart contract functions
@@ -248,6 +350,7 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 | Function signature | Access control | Purpose |
 |---|---|---|
 | `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap, string calldata role)` | `onlyOwner` | Registers a new agent's wallet address, its two caps, and its role label. §4.1 |
+| ↳ **proposed:** `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap)` | `onlyOwner` | Drops `role` once ERC-8004 metadata owns the name and role (§4.1). **Not yet implemented** — the shipped contract still takes the string. |
 | `initialize(address owner)` | Once, by the factory | Sets the owner. Replaces a constructor, which a minimal proxy cannot run. |
 | `fundAgent(address agent, uint256 amount)` | `onlyOwner` | Earmarks USDC the Roster **already holds** for that agent. Moves no tokens. Reverts if the balance can't cover every earmark. §4.6 |
 | `executeSpend(uint256 amount, address payee, bytes calldata memo) returns (bool executed, uint256 requestId)` | `onlyAgent` | Checks both caps. If satisfied, transfers `amount` to the agent's own wallet and returns `executed = true`. If not, opens a pending request. §4.2, §4.3 |

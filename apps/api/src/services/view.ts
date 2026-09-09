@@ -70,7 +70,9 @@ export function toPendingView(request: OpenRequest, info: AgentInfo): PendingVie
     agentId: agentId(request.agent),
     agentName: label.name,
     agentRole: label.role,
-    // The payee is a third party the owner is about to pay. That one they do need to see.
+    // The agent's declared payee. The contract never verifies it and never pays it — funds go
+    // to the agent's own wallet, which signs the x402 payment itself (§4.2). Surfaced because
+    // the owner is deciding, but it is intent, not a settlement destination.
     payee: request.payee,
     purpose: decodeMemo(request.memo),
     amount: request.amount.toString(),

@@ -55,12 +55,18 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
       </div>
 
       {/* The most important line on the screen: it tells the owner the approval *is* the
-          signature. §4.3 — approvePending releases the funds with no second step. */}
+          signature. §4.3 — approvePending releases the funds with no second step.
+
+          It says "releases to {agent} to pay {payee}", not "settles to {payee}", because that is
+          what the contract does: executeSpend and approvePending both transfer to the agent's own
+          wallet, which then signs the x402 payment itself (§4.2). The payee on a request is the
+          agent's declaration of intent — the contract never verifies it and never pays it. The
+          cap is the guarantee; the destination is not, and the screen should not imply otherwise. */}
       <div className="callout">
         <span className="callout-mark"><CornerArrow /></span>
         <span>
-          Approving settles <strong>{usd(request.amount)}</strong> to {request.payee} immediately — there is no
-          second confirmation, and it counts against {agent.name}&rsquo;s {month} cap.
+          Approving releases <strong>{usd(request.amount)}</strong> to {agent.name} to pay {request.payee} — there
+          is no second confirmation, and it counts against {agent.name}&rsquo;s {month} cap.
         </span>
       </div>
 

@@ -62,10 +62,15 @@ transcribes the copy and structure so it can be diffed and searched without open
   (Authentication / Today, 09:12) · `PER-TRANSACTION LIMIT` ($75.00 / $45.00 over) ·
   `MONTHLY CAP AFTER` ($732 / of $900).
 - Consequence callout above the action buttons:
-  > Approving settles $120.00 to Verity Watch Authentication immediately — there is no second
+  > Approving releases $120.00 to Runner to pay Verity Watch Authentication — there is no second
   > confirmation, and it counts against Runner's September cap.
 
   This is the screen's most important line. It tells the owner the approval *is* the signature.
+
+  **Reworded 2026-09-09** from "settles $120.00 to Verity Watch Authentication immediately". The
+  contract transfers to the *agent's* wallet, which then signs the x402 payment itself (§4.2) —
+  it never pays the payee, and never verifies it. The original claimed a guarantee the contract
+  does not make.
 
 ## 3. Hire an agent
 

@@ -2,6 +2,20 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-09 — The payee is advisory, and the UI now says so
+Found by auditing the contract. `executeSpend` and `approvePending` both transfer to the agent's
+own wallet — never to the payee, which the agent then pays itself over x402 (§4.2, and the
+2026-09-08 point-of-use decision). The payee recorded on a spend or a held request is the agent's
+declaration of intent. The contract does not verify it and cannot enforce it: an agent can name
+any payee and keep the funds.
+
+That is inherent to the design and is not being changed — releasing at point of use is what makes
+the kill switch meaningful. What was wrong was the pending screen, which read "Approving settles
+$120.00 to Verity Watch Authentication immediately" and claimed a guarantee the contract does not
+make. It now reads "Approving releases $120.00 to Runner to pay Verity Watch Authentication".
+
+The cap is the guarantee; the destination is not. Worth having straight before a judge asks.
+
 ## 2026-09-09 — RosterFactory keeps no on-chain registry
 Found by auditing the contract. `createRoster(owner)` indexed each deployment into
 `_rostersOf[owner]`, but creation is permissionless by necessity: the backend deploys on an

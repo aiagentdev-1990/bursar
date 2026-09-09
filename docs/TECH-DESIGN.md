@@ -143,6 +143,12 @@ sequenceDiagram
 
 No owner signature anywhere in this path. `executeSpend` is `onlyAgent`.
 
+**`payee` is advisory.** Both `executeSpend` and `approvePending` transfer to the *agent's own
+wallet*, never to the payee — the agent signs the x402 payment itself. The payee recorded on a
+spend or a pending request is the agent's declaration of intent; the contract does not verify it
+and cannot enforce it. The cap is the guarantee, the destination is not, and owner-facing copy
+must not imply otherwise.
+
 **Timing matters.** `executeSpend` fires immediately before the agent retries the x402 request, not ahead of time as a batch top-up — that bounds the released-but-unspent window to a single request.
 
 **Failure case: release succeeds but the x402 payment doesn't.** The USDC stays in the agent's wallet and counts against its period cap. Nothing reclaims it today — `sweepUnspent` was removed (see §5). The point-of-use release above is what keeps this bounded: at most one request's worth is ever stranded, rather than an accumulating balance. Reclaiming it needs an ERC-20 allowance from the agent's wallet, which §4.1's onboarding would have to establish first.

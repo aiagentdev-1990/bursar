@@ -77,13 +77,21 @@ async function environmentId(): Promise<string> {
   return environment.id
 }
 
-/// Provisions and starts one agent. Returns the session id, which is stored against the agent's
-/// wallet so §4.3 can resume it after an approval.
+export interface StartedSession {
+  claudeAgentId: string
+  sessionId: string
+  /// Where to watch it run.
+  traceUrl: string
+}
+
+/// Provisions and starts one agent: Agent config (per role, cached) → Session → the user event
+/// that actually sets it working. Creating a session only provisions it.
 export async function startAgentSession(params: {
-  wallet: string
+  key: string
   name: string
   role: string
-}): Promise<string> {
+  briefing?: string
+}): Promise<StartedSession> {
   const agent = await agentConfigForRole(params.role)
 
   const session = await anthropic().beta.sessions.create({
@@ -92,9 +100,8 @@ export async function startAgentSession(params: {
     title: `${params.name} · ${params.role}`,
   })
 
-  store.setSession(params.wallet, session.id)
+  store.setSession(params.key, session.id)
 
-  // Creating the session only provisions it. This is what actually starts the agent working.
   await anthropic().beta.sessions.events.send(session.id, {
     events: [
       {
@@ -102,14 +109,21 @@ export async function startAgentSession(params: {
         content: [
           {
             type: 'text',
-            text: `You have been hired as ${params.name}. Begin your work: ${params.role}.`,
+            text:
+              params.briefing ??
+              `You have been hired as ${params.name}. Your role: ${params.role}. Introduce yourself ` +
+                `in one line, then say what you plan to do first.`,
           },
         ],
       },
     ],
   })
 
-  return session.id
+  return {
+    claudeAgentId: agent.id,
+    sessionId: session.id,
+    traceUrl: `https://platform.claude.com/workspaces/default/sessions/${session.id}`,
+  }
 }
 
 /// §4.3, after `approvePending` has been confirmed on-chain. The backend sends this itself

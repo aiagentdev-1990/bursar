@@ -15,7 +15,25 @@ import { dirname, resolve } from 'node:path'
 /// Overridable so the integration tests get a throwaway path instead of the repo root.
 const FILE = process.env.ROSTER_STORE_FILE ?? resolve(process.cwd(), '.roster-store.json')
 
+export interface StoredAgent {
+  wallet: string
+  name: string
+  role: string
+  /// USDC base units, as strings — never a float, even in scaffolding.
+  perTxCap: string
+  perPeriodCap: string
+  claudeAgentId?: string
+  sessionId?: string
+  createdAt: string
+}
+
 type Shape = {
+  /// agent wallet address (lowercased) → what was provisioned for it.
+  ///
+  /// In provisioning-only mode this is the roster. Once the contract is wired it stops being a
+  /// source of truth for anything the chain knows — caps, spend and active status come from
+  /// `getAgent`, and this keeps only what no chain holds.
+  agents: Record<string, StoredAgent>
   /// role label → Managed Agents agent id + version
   agentConfigs: Record<string, { id: string; version: number }>
   /// agent wallet address (lowercased) → Claude session id
@@ -24,7 +42,7 @@ type Shape = {
   localKeys: Record<string, string>
 }
 
-const EMPTY: Shape = { agentConfigs: {}, sessions: {}, localKeys: {} }
+const EMPTY: Shape = { agents: {}, agentConfigs: {}, sessions: {}, localKeys: {} }
 
 function read(): Shape {
   if (!existsSync(FILE)) return structuredClone(EMPTY)
@@ -42,6 +60,18 @@ function write(state: Shape): void {
 }
 
 export const store = {
+  putAgent(agent: StoredAgent) {
+    const state = read()
+    state.agents[agent.wallet.toLowerCase()] = agent
+    write(state)
+  },
+  getAgent(wallet: string): StoredAgent | undefined {
+    return read().agents[wallet.toLowerCase()]
+  },
+  listAgents(): StoredAgent[] {
+    return Object.values(read().agents).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  },
+
   getAgentConfig(role: string) {
     return read().agentConfigs[role]
   },

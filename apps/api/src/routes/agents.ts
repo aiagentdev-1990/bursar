@@ -4,10 +4,12 @@ import { stringToHex, type Address } from 'viem'
 import * as contract from '../chain/roster.js'
 import { fetchRosterEvents, agentAddressesFrom, openRequestsFrom } from '../services/blockscout.js'
 import { encodeLabel, decodeLabel, InvalidLabelError } from '../services/labels.js'
-import { findByAgentId } from '../services/ids.js'
+import { findByAgentId, agentId } from '../services/ids.js'
 import { toAgentView, toActivityView } from '../services/view.js'
 import { walletProvider } from '../services/wallets.js'
 import { startAgentSession, AgentRuntimeUnavailable } from '../services/agentRuntime.js'
+import { contractEnabled } from '../chain/chain.js'
+import { store } from '../services/store.js'
 import { ApiError } from '../http/errors.js'
 
 /// §6. Owner-authenticated (mounted behind requireOwner). Agents never call these — an agent's
@@ -81,6 +83,21 @@ function requireAddress(addresses: Address[], id: string): Address {
 // ─── GET /agents ────────────────────────────────────────────────────────────
 
 agents.get('/', async (c) => {
+  if (!contractEnabled()) {
+    return c.json({
+      agents: store.listAgents().map((a) => ({
+        id: agentId(a.wallet as `0x${string}`),
+        name: a.name,
+        role: a.role,
+        perTxCap: a.perTxCap,
+        perPeriodCap: a.perPeriodCap,
+        status: 'active' as const,
+        sessionId: a.sessionId,
+      })),
+      warning: 'Provisioning-only mode: caps shown are not enforced.',
+    })
+  }
+
   const { addresses, infos, lastActivity, pendingBy } = await loadRoster()
 
   const roster = addresses
@@ -101,6 +118,45 @@ agents.get('/', async (c) => {
 
 agents.post('/', async (c) => {
   const body = await parse(c, hireBody)
+
+  // Provisioning-only mode: no ROSTER_CONTRACT_ADDRESS, so nothing is registered on-chain and
+  // NO CAP IS ENFORCED ANYWHERE. Scaffolding for building the onboarding flow ahead of the
+  // contract — the response says so, rather than implying an allowance that does not exist.
+  if (!contractEnabled()) {
+    const wallet = await walletProvider().createAgentWallet(body.name)
+
+    const started = await startAgentSession({ key: wallet, name: body.name, role: body.role })
+
+    store.putAgent({
+      wallet,
+      name: body.name,
+      role: body.role,
+      perTxCap: body.perTxCap.toString(),
+      perPeriodCap: body.perPeriodCap.toString(),
+      claudeAgentId: started.claudeAgentId,
+      sessionId: started.sessionId,
+      createdAt: new Date().toISOString(),
+    })
+
+    return c.json(
+      {
+        agent: {
+          id: agentId(wallet),
+          name: body.name,
+          role: body.role,
+          perTxCap: body.perTxCap.toString(),
+          perPeriodCap: body.perPeriodCap.toString(),
+          status: 'active' as const,
+        },
+        started: true,
+        session: started,
+        warning:
+          'Provisioning-only mode: no ROSTER_CONTRACT_ADDRESS is set, so these caps are recorded ' +
+          'but not enforced. Nothing stops this agent spending.',
+      },
+      201,
+    )
+  }
 
   let role: string
   try {
@@ -123,10 +179,10 @@ agents.post('/', async (c) => {
   }
 
   // 3. Claude Agent config, Environment, Session, then the user event that starts it working.
-  let sessionId: string | undefined
+  let started: Awaited<ReturnType<typeof startAgentSession>> | undefined
   let runtimeWarning: string | undefined
   try {
-    sessionId = await startAgentSession({ wallet, name: body.name, role: body.role })
+    started = await startAgentSession({ key: wallet, name: body.name, role: body.role })
   } catch (error) {
     if (error instanceof AgentRuntimeUnavailable) {
       runtimeWarning = `Agent is on the roster and its caps are enforced, but no Claude session started: ${error.message}`
@@ -140,7 +196,8 @@ agents.post('/', async (c) => {
   return c.json(
     {
       agent: toAgentView(wallet, info, { hasOpenRequest: false }),
-      started: sessionId !== undefined,
+      started: started !== undefined,
+      ...(started ? { session: started } : {}),
       ...(runtimeWarning ? { warning: runtimeWarning } : {}),
     },
     201,

@@ -40,4 +40,8 @@ export const ownerClient = createWalletClient({
   transport: http(env.ARC_TESTNET_RPC_URL),
 })
 
-export const ROSTER_ADDRESS = env.ROSTER_CONTRACT_ADDRESS
+/// Undefined in provisioning-only mode. `contractEnabled()` is the guard; anything reaching for
+/// this address without checking will fail loudly rather than silently read address zero.
+export const ROSTER_ADDRESS = env.ROSTER_CONTRACT_ADDRESS as `0x${string}`
+
+export const contractEnabled = (): boolean => env.ROSTER_CONTRACT_ADDRESS !== undefined

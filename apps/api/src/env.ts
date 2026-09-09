@@ -20,7 +20,10 @@ const schema = z.object({
   ARC_TESTNET_RPC_URL: z.string().url(),
   ARC_CHAIN_ID: z.coerce.number().int().default(5042002),
   USDC_ADDRESS: address.default('0x3600000000000000000000000000000000000000'),
-  ROSTER_CONTRACT_ADDRESS: address,
+  /// Optional on purpose. Without it the service runs in **provisioning-only** mode: it creates
+  /// wallets and Claude sessions but registers nothing on-chain, and no cap is enforced anywhere.
+  /// Scaffolding for building the onboarding flow ahead of the contract, not a supported mode.
+  ROSTER_CONTRACT_ADDRESS: address.optional(),
   ROSTER_FACTORY_ADDRESS: address.optional(),
 
   /// The owner's signing key. hireAgent, approvePending, rejectPending, revokeAgent and

@@ -157,6 +157,36 @@ advance. `hireAgent` therefore signs over the id the registry is *about to* mint
 simulating `register` — and the transaction reverts if the registry assigns a different one,
 because the signature will not verify. A race costs a retry, never a wrong binding.
 
+#### Wallets: two keys, two blast radii
+
+Privy holds every private key. Access to it is via **authorization keys**, which are bound to
+specific wallets — so a credential is scoped to one wallet, not to the whole Privy app.
+
+| Key | Held by | Can |
+|---|---|---|
+| **Owner** key | Roster backend | Create wallets, set and change policies, add or revoke signers |
+| **Signer** key | The agent's session, one per agent | Transact from **its own wallet only** |
+
+A signer *cannot* update the wallet's owner, its signers, or its policies, and cannot export the
+private key. So an agent can spend within its policy and cannot widen it.
+
+This is why the agent is not given `PRIVY_APP_SECRET`. That secret is app-wide: any agent holding
+it could enumerate every wallet in the app and transact from another agent's. The on-chain caps
+would still bind each wallet, but "each agent spends only its own budget" would not — and that is
+close enough to the product's central claim to matter.
+
+At hire time the backend also attaches a **Privy policy** restricting the wallet to calling the
+Roster contract on Arc. That is not the guarantee — the contract is — but it bounds what an agent
+can do with USDC already released to it, which is the exposure left open when `sweepUnspent` was
+removed.
+
+Revoking the signer key at Privy is therefore a second, independent kill switch alongside
+`revokeAgent`. The on-chain one remains the guarantee; this one is defence in depth.
+
+> Privy's own recipe has the backend hold the key and execute transactions for the agent. We
+> diverge deliberately: scoped signer keys make direct agent access safe, and §4.2's claim that the
+> agent pays with its own wallet and no owner involvement depends on it.
+
 #### The registry is in the hire path, and nowhere else
 
 `executeSpend` and `revokeAgent` never call the registry. The kill switch must not be able to fail
@@ -226,6 +256,25 @@ wallet*, never to the payee — the agent signs the x402 payment itself. The pay
 spend or a pending request is the agent's declaration of intent; the contract does not verify it
 and cannot enforce it. The cap is the guarantee, the destination is not, and owner-facing copy
 must not imply otherwise.
+
+**How the agent signs.** It does not hold a private key, and it could not: Managed Agents vault
+credentials are substituted at egress and are never visible to sandbox code, so there is no way to
+hand key material to the agent even if we wanted to. Instead the agent's session carries its
+wallet-scoped Privy **signer key** as a vault credential, and its payment skill calls Privy's REST
+API from inside the sandbox — `POST /v1/wallets/{id}/rpc` with `eth_sendTransaction` — to submit
+`executeSpend` and to sign the x402 payment header. Privy holds the key and signs; the agent never
+sees the credential; the transaction still originates from the agent's own wallet.
+
+This is why the payment path is a **skill and not a custom tool**. A Managed Agents custom tool
+call returns to *our* client code for execution, which would move the whole payment onto our
+backend and contradict both §6 and the rule that the backend never signs a payment on an agent's
+behalf. A skill runs in the agent's own sandbox, so the payment stays the agent's.
+
+The skill is uploaded once via the Skills API and referenced from each role's Agent config as
+`{ type: "custom", skill_id, version }`. It is adapted from Privy's published agentic-wallets
+skill, with the app-secret authentication replaced by the wallet-scoped signer key, and extended
+with the two things that skill has no reason to know: how to call `executeSpend` before retrying a
+402, and that a held payment is an expected outcome to report and work around, not an error.
 
 **Timing matters.** `executeSpend` fires immediately before the agent retries the x402 request, not ahead of time as a batch top-up — that bounds the released-but-unspent window to a single request.
 

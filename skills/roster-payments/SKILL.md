@@ -64,13 +64,13 @@ Two batches. Nothing here is secret.
 
 | Field | What it is |
 |---|---|
-| `rosterContract` | The Allowance Contract that will hold your budget |
+| `rosterContract` | The Allowance Contract that enforces your limits and pays from your owner's balance |
 | `privyAppId` | Privy application id |
 | `rpcUrl` | Arc testnet JSON-RPC endpoint |
 | `relayUrl` | Your owner's relay, which submits your signed spend requests and pays their gas |
 
 If a field is missing, use your owner's defaults: `rosterContract`
-`0x17a021A777A231509e6ddb13772CD32AB10ad258`, `relayUrl` `https://api-production-faaef.up.railway.app`.
+`0x823C07bd183405E6FDf3e2e0412315D3B6fDfBBa`, `relayUrl` `https://api-production-faaef.up.railway.app`.
 Values you are given always win over these.
 
 **After you report your public key** — your wallet does not exist until then, so neither do these:
@@ -94,12 +94,14 @@ Before starting anything that costs money, read your own state:
 eth_call → rosterContract
 getAgent(address) returns (
   uint256 perTxCap, uint256 perPeriodCap, uint256 periodSpend, uint256 periodStart,
-  uint256 earmarkedBalance, string role, bool registered, bool active
+  string role, bool registered, bool active
 )
+eth_call → USDC.balanceOf(rosterContract)   // your owner's account, shared by the whole team
 ```
 
 `perPeriodCap - periodSpend` is what remains this period. This view already accounts for the
-period rolling over, so trust it as-is.
+period rolling over, so trust it as-is. Purchases are paid from your owner's account, so you can
+spend up to the smaller of that and what remains.
 
 If a task plainly costs more than you have left, say so before you start rather than halfway
 through.
@@ -138,7 +140,8 @@ never send a transaction and never need gas. Your owner's relay submits it and p
 4. executed  → the USDC is in your wallet. Settle the x402 payment and retry the request.
    !executed → the payment is HELD. See below. Do not retry.
    HTTP error → refused; `error.code` is the Roster's reason (AgentNotActive, InvalidSignature,
-                SignatureExpired, InsufficientEarmarkedBalance). Nothing was spent.
+                SignatureExpired, InsufficientBalance — your owner's account is empty; tell them).
+                Nothing was spent.
 ```
 
 The relay cannot alter what you signed and cannot send the money anywhere but your own wallet —

@@ -38,7 +38,6 @@ export interface HireRecord {
   /// USDC base units, as strings.
   perTxCap: string
   perPeriodCap: string
-  fundAmount?: string
   /// The agent's first task, sent once it is on the roster.
   briefing?: string
   status: HireStatus

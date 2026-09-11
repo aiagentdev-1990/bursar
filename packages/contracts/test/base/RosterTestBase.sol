@@ -32,8 +32,8 @@ abstract contract RosterTestBase is Test {
     uint256 internal constant CONCIERGE_PER_TX = 25 * USD;
     uint256 internal constant CONCIERGE_PER_PERIOD = 150 * USD;
 
+    /// The one balance every agent on the roster spends from.
     uint256 internal constant TREASURY = 10_000 * USD;
-    uint256 internal constant EARMARK = 1_000 * USD;
 
     bytes internal constant MEMO = bytes("Comparable sold-listing pull");
 
@@ -47,12 +47,13 @@ abstract contract RosterTestBase is Test {
         roster.hireAgent(concierge, CONCIERGE_PER_TX, CONCIERGE_PER_PERIOD, "Buyer questions and offers");
         vm.stopPrank();
 
-        // Funding arrives at the Roster address first (§4.6), then the owner earmarks it.
+        // Funding is a plain transfer to the Roster address (§4.6). There is no allocation step:
+        // both agents spend from this balance as soon as it lands.
         usdc.mint(address(roster), TREASURY);
-        vm.startPrank(owner);
-        roster.fundAgent(pricer, EARMARK);
-        roster.fundAgent(concierge, EARMARK);
-        vm.stopPrank();
+    }
+
+    function _balance() internal view returns (uint256) {
+        return usdc.balanceOf(address(roster));
     }
 
     // ─── helpers ──────────────────────────────────────────────────────────────

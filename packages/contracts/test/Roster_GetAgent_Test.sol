@@ -13,7 +13,6 @@ contract Roster_GetAgent_Test is RosterTestBase {
         assertEq(info.perTxCap, PRICER_PER_TX);
         assertEq(info.perPeriodCap, PRICER_PER_PERIOD);
         assertEq(info.periodSpend, 0);
-        assertEq(info.earmarkedBalance, EARMARK);
         assertEq(info.role, "Comparable-listing research");
         assertGt(info.periodStart, 0);
         assertTrue(info.registered);
@@ -48,7 +47,6 @@ contract Roster_GetAgent_Test is RosterTestBase {
         _spend(pricer, PRICER_PER_TX);
 
         assertEq(_agent(pricer).periodSpend, PRICER_PER_TX);
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK - PRICER_PER_TX);
     }
 
     /// The view reports the period the contract would enforce right now, not the one it last

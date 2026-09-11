@@ -67,24 +67,6 @@ export const rosterAbi = [
   },
   {
     "type": "function",
-    "name": "defundAgent",
-    "inputs": [
-      {
-        "name": "agent",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "eip712Domain",
     "inputs": [],
     "outputs": [
@@ -211,24 +193,6 @@ export const rosterAbi = [
   },
   {
     "type": "function",
-    "name": "fundAgent",
-    "inputs": [
-      {
-        "name": "agent",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "getAgent",
     "inputs": [
       {
@@ -260,11 +224,6 @@ export const rosterAbi = [
           },
           {
             "name": "periodStart",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "earmarkedBalance",
             "type": "uint256",
             "internalType": "uint256"
           },
@@ -448,19 +407,6 @@ export const rosterAbi = [
   },
   {
     "type": "function",
-    "name": "totalEarmarked",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "updateCaps",
     "inputs": [
       {
@@ -540,44 +486,6 @@ export const rosterAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "AllowanceDefunded",
-    "inputs": [
-      {
-        "name": "agent",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "AllowanceFunded",
-    "inputs": [
-      {
-        "name": "agent",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -774,12 +682,7 @@ export const rosterAbi = [
   },
   {
     "type": "error",
-    "name": "InsufficientEarmarkedBalance",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InsufficientTreasury",
+    "name": "InsufficientBalance",
     "inputs": []
   },
   {

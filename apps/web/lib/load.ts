@@ -2,9 +2,9 @@
 // checkpoint-8 fixtures. The API sends money as base-unit decimal strings (never a JSON number,
 // which would round a USDC amount), and they become bigints here, at the edge.
 //
-// Where each figure comes from (§4.5): caps, period spend, earmark and active status are the
-// contract's own `getAgent`; membership, history and the open-request set are the event log via
-// Blockscout. Nothing here recomputes cap or period arithmetic — a second implementation of it
+// Where each figure comes from (§4.5): caps, period spend and active status are the contract's
+// own `getAgent`; the balance is the Roster's USDC balance; membership, history and the
+// open-request set are the event log via Blockscout. Nothing here recomputes cap or period arithmetic — a second implementation of it
 // is the thing that could disagree with the contract.
 
 import { api, ApiRequestError, ApiUnavailable } from './api'
@@ -22,6 +22,7 @@ import {
   type Payment,
   type PaymentStatus,
   type PendingRequest,
+  type Treasury,
 } from './roster'
 
 // ─── wire shapes (apps/api/src/services/view.ts) ─────────────────────────────
@@ -33,7 +34,6 @@ interface AgentWire {
   perTxCap: string
   perPeriodCap: string
   periodSpend?: string
-  earmarkedBalance?: string
   status: AgentStatus
   lastActivityAt?: string
 }
@@ -64,6 +64,11 @@ interface ActivityWire {
   transactionHash: string
 }
 
+interface TreasuryWire {
+  balance: string
+  ownerBalance?: string
+}
+
 interface HireWire {
   id: string
   name: string
@@ -83,16 +88,19 @@ export interface RosterData {
   payments: Payment[]
   /** Hires still in flight, and failures not yet dismissed. Finished hires are in `agents`. */
   hires: Hire[]
+  /** The shared balance. Undefined if it could not be read — the roster still renders. */
+  treasury?: Treasury
   /** Local `YYYY-MM-DD` on the server, for day headings. */
   today: string
 }
 
 export async function loadRoster(now = new Date()): Promise<RosterData> {
-  const [agentsBody, pendingBody, activityBody, hires] = await Promise.all([
+  const [agentsBody, pendingBody, activityBody, hires, treasury] = await Promise.all([
     api<{ agents: AgentWire[] }>('/agents'),
     api<{ pending: PendingWire[] }>('/pending'),
     api<{ activity: ActivityWire[] }>('/activity'),
     loadHires(),
+    loadTreasury(),
   ])
 
   const roles = new Map(agentsBody.agents.map((a) => [a.id, a.role]))
@@ -103,7 +111,19 @@ export async function loadRoster(now = new Date()): Promise<RosterData> {
     pending: pendingBody.pending.map((p) => toPending(p, now)),
     payments,
     hires,
+    treasury,
     today: dayKey(now),
+  }
+}
+
+async function loadTreasury(): Promise<Treasury | undefined> {
+  try {
+    const { treasury } = await api<{ treasury: TreasuryWire }>('/treasury')
+    return { balance: big(treasury.balance), ownerBalance: big(treasury.ownerBalance) }
+  } catch (error) {
+    // The balance is one figure on the page; failing to read it should not blank the roster.
+    if (error instanceof ApiRequestError) return undefined
+    throw error
   }
 }
 
@@ -180,7 +200,6 @@ function toAgent(wire: AgentWire, payments: Payment[], now: Date): Agent {
     perTxCap: big(wire.perTxCap),
     perPeriodCap: big(wire.perPeriodCap),
     periodSpend: big(wire.periodSpend),
-    earmarkedBalance: big(wire.earmarkedBalance),
     status: wire.status,
     lastActivity: wire.lastActivityAt ? relative(wire.lastActivityAt, now) : '—',
     trend,

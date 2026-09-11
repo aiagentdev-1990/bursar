@@ -49,7 +49,7 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
       </Link>
 
       <div>
-        <span className="eyebrow">Pending approval · Over cap</span>
+        <span className="eyebrow">Pending approval · Over its limit</span>
         <div className="hero-line">
           <span className="hero">{usd(request.amount)}</span>
           <span className="hero-note">to {request.payee}</span>
@@ -63,11 +63,11 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
         <Cell label="Requested by" value={request.agentName} sub={request.agentRole} />
         <Cell label="Category" value={request.category} sub={request.requestedAt || `Request #${request.requestId}`} />
         <Cell
-          label="Per-transaction limit"
+          label="Per-purchase limit"
           value={usd(request.perTxCap)}
           sub={overTx ? `${usd(request.amount - request.perTxCap)} over` : 'Within limit'}
         />
-        <Cell label="Monthly cap after" value={usdWhole(capAfter)} sub={`of ${usdWhole(request.perPeriodCap)}`} />
+        <Cell label="Spent this month, after" value={usdWhole(capAfter)} sub={`of its ${usdWhole(request.perPeriodCap)} limit`} />
       </div>
 
       {/* The most important line on the screen: it tells the owner the approval *is* the
@@ -81,8 +81,9 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
       <div className="callout">
         <span className="callout-mark"><CornerArrow /></span>
         <span>
-          Approving releases <strong>{usd(request.amount)}</strong> to {request.agentName} to pay {request.payee} — there
-          is no second confirmation, and it counts against {request.agentName}&rsquo;s {month} cap.
+          Approving releases <strong>{usd(request.amount)}</strong> from your balance to {request.agentName} to pay{' '}
+          {request.payee} — there is no second confirmation, and it counts against {request.agentName}&rsquo;s {month}{' '}
+          limit.
         </span>
       </div>
 

@@ -1,13 +1,14 @@
 import Link from 'next/link'
+import { AddMoney } from '@/components/AddMoney'
 import { AgentTable } from '@/components/AgentTable'
 import { AutoRefresh } from '@/components/AutoRefresh'
 import { Onboarding } from '@/components/Onboarding'
 import { Stat, StatRow } from '@/components/Stat'
 import { Unavailable } from '@/components/Unavailable'
 import { InfoIcon, ArrowRight } from '@/components/Icons'
-import { usd, usdWhole } from '@/lib/money'
+import { usd } from '@/lib/money'
 import { attempt, loadRoster } from '@/lib/load'
-import { heldBecause, sum, type Agent, type PendingRequest } from '@/lib/roster'
+import { heldBecause, roomThisMonth, sum, type Agent, type PendingRequest, type Treasury } from '@/lib/roster'
 import { periodLabel } from '@/lib/org'
 
 // Live chain state on every request — a cached roster would show a revoked agent as active.
@@ -47,6 +48,31 @@ function PendingBanner({ agents, pending }: { agents: Agent[]; pending: PendingR
   )
 }
 
+/** Shown only when it is true: the agents' remaining monthly limits add up to more than the
+ *  balance, so the balance — not the limits — is what will stop them. Limits above the balance
+ *  are allowed and normal (they are permissions, not promises); this just says which one binds. */
+function LowBalanceBanner({ agents, treasury }: { agents: Agent[]; treasury?: Treasury }) {
+  if (!treasury) return null
+  const room = roomThisMonth(agents)
+  if (room <= treasury.balance) return null
+
+  return (
+    <div className="banner" data-state="warning">
+      <span className="banner-icon"><InfoIcon /></span>
+      <div className="banner-body">
+        <div className="banner-title">
+          {treasury.balance === 0n ? 'Your balance is empty' : 'Your balance is lower than your agents’ limits'}
+        </div>
+        <div className="banner-sub">
+          Their monthly limits allow up to {usd(room)} more this month, and the balance is {usd(treasury.balance)}.
+          Once it runs out, purchases are refused until you add money.
+        </div>
+      </div>
+      <AddMoney available={usd(treasury.ownerBalance)} />
+    </div>
+  )
+}
+
 export default async function RosterOverview() {
   const label = periodLabel()
   const result = await attempt(() => loadRoster())
@@ -54,38 +80,40 @@ export default async function RosterOverview() {
   if (!result.ok) {
     return (
       <>
-        <span className="eyebrow">Roster spend · {label}</span>
+        <span className="eyebrow">Balance</span>
         <Unavailable message={result.message} />
       </>
     )
   }
 
-  const { agents, pending, hires } = result.value
-  const spend = sum(agents.map((a) => a.periodSpend))
-  const committed = sum(agents.map((a) => a.perPeriodCap))
-  // Per agent, floored at zero: an approval can legitimately carry an agent past its cap, and
-  // that overshoot is not negative headroom on everyone else.
-  const unspent = sum(agents.map((a) => (a.perPeriodCap > a.periodSpend ? a.perPeriodCap - a.periodSpend : 0n)))
+  const { agents, pending, hires, treasury } = result.value
+  const spent = sum(agents.map((a) => a.periodSpend))
 
   return (
     <>
       <div className="pagehead">
         <div>
-          <span className="eyebrow">Roster spend · {label}</span>
+          <span className="eyebrow">Balance</span>
           <div className="hero-line">
-            <span className="hero">{usd(spend)}</span>
-            <span className="hero-note">of {usdWhole(committed)} committed</span>
+            <span className="hero">{treasury ? usd(treasury.balance) : '—'}</span>
+            <span className="hero-note">shared by every agent, each within its own limits</span>
           </div>
+          {treasury && (
+            <div className="hero-actions">
+              <AddMoney available={usd(treasury.ownerBalance)} />
+            </div>
+          )}
         </div>
 
         <StatRow>
           <Stat label="Agents">{agents.length}</Stat>
+          <Stat label={`Spent in ${label}`}>{usd(spent)}</Stat>
           <Stat label="Awaiting approval">{usd(sum(pending.map((r) => r.amount)))}</Stat>
-          <Stat label="Unspent">{usdWhole(unspent)}</Stat>
         </StatRow>
       </div>
 
       <PendingBanner agents={agents} pending={pending} />
+      <LowBalanceBanner agents={agents} treasury={treasury} />
       <Onboarding hires={hires} />
       <AgentTable agents={agents} />
       {/* Only while something is still moving — a failed hire waits for the owner, not a timer. */}

@@ -14,6 +14,12 @@
       "port": 3000
     },
     {
+      "name": "roster-web-local",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["ROSTER_API_URL=http://localhost:8787", "pnpm", "--filter", "@roster/web", "dev"],
+      "port": 3000
+    },
+    {
       "name": "roster-seller",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@roster/seller", "dev"],

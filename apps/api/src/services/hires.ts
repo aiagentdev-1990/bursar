@@ -10,13 +10,14 @@ import type { HireRecord, HireStatus, StoredAgent } from './store.js'
 ///   starting     → a new Claude agent with the payment skill, and a session on it
 ///   setting-up   → the skill's setup creates the wallet in the agent's own sandbox; wait for the
 ///                  address it reports (this is the step that takes minutes)
-///   registering  → hire that address on-chain with its caps, then fund it
+///   registering  → hire that address on-chain with its caps. That is the whole setup: the agent
+///                  spends from the roster's shared balance, so there is nothing to fund
 ///   briefing     → tell the agent where its allowance lives — the Roster and the relay — and its task
 ///   active
 ///
 /// Every step is written to the store as it completes, so a restart resumes a hire from the last
-/// one it finished (`resume`). The registering step reads the chain first and skips what is
-/// already done, so a resumed hire never registers or funds twice.
+/// one it finished (`resume`). The registering step reads the chain first, so a resumed hire
+/// never registers twice.
 ///
 /// Dependencies are passed in rather than imported, so the step logic is tested with fakes
 /// (hires.test.ts); services/hiring.ts wires in the real runtime, chain and store.
@@ -35,9 +36,8 @@ export interface HireDeps {
     /// False in provisioning-only mode: the agent is set up but nothing is registered.
     enabled: boolean
     rosterAddress: Address
-    getAgent(agent: Address): Promise<{ registered: boolean; earmarkedBalance: bigint }>
+    getAgent(agent: Address): Promise<{ registered: boolean }>
     hireAgent(agent: Address, perTxCap: bigint, perPeriodCap: bigint, label: string): Promise<unknown>
-    fundAgent(agent: Address, amount: bigint): Promise<unknown>
   }
   store: {
     putHire(hire: HireRecord): void
@@ -55,7 +55,6 @@ export interface HireInput {
   role: string
   perTxCap: bigint
   perPeriodCap: bigint
-  fundAmount?: bigint
   briefing?: string
 }
 
@@ -89,8 +88,10 @@ export function onRosterBriefing(
       ? `Relay URL: ${relayUrl}`
       : 'Relay URL: not configured yet. Do not try to buy anything until you are given one.',
     '',
-    `Your caps: ${usd(hire.perTxCap)} per transaction, ${usd(hire.perPeriodCap)} per 30 days. Anything`,
-    'above either is held for your owner to decide.',
+    `Your limits: ${usd(hire.perTxCap)} per purchase, ${usd(hire.perPeriodCap)} per 30 days. Anything`,
+    'above either is held for your owner to decide. Purchases are paid from your owner’s account',
+    'balance, which the whole team shares; if a spend comes back InsufficientBalance, tell your owner',
+    'the account needs topping up.',
     '',
     hire.briefing ?? 'Introduce yourself in one line, then say what you plan to do first.',
   ].join('\n')
@@ -133,9 +134,8 @@ export function createHireJobs(deps: HireDeps) {
     if (hire.status === 'registering') {
       const wallet = hire.wallet as Address
       if (deps.chain.enabled) {
-        // Read first, so a hire resumed after these writes landed does not repeat them.
-        const before = await deps.chain.getAgent(wallet)
-        if (!before.registered) {
+        // Read first, so a hire resumed after the write landed does not repeat it.
+        if (!(await deps.chain.getAgent(wallet)).registered) {
           await deps.chain.hireAgent(
             wallet,
             BigInt(hire.perTxCap),
@@ -144,9 +144,6 @@ export function createHireJobs(deps: HireDeps) {
           )
         }
         hire = update(id, { registered: true })
-        if (hire.fundAmount && before.earmarkedBalance === 0n) {
-          await deps.chain.fundAgent(wallet, BigInt(hire.fundAmount))
-        }
       }
 
       deps.store.setSession(wallet, hire.sessionId!)
@@ -202,7 +199,6 @@ export function createHireJobs(deps: HireDeps) {
       role: input.role,
       perTxCap: input.perTxCap.toString(),
       perPeriodCap: input.perPeriodCap.toString(),
-      ...(input.fundAmount ? { fundAmount: input.fundAmount.toString() } : {}),
       ...(input.briefing ? { briefing: input.briefing } : {}),
       status: 'starting',
       createdAt: now,

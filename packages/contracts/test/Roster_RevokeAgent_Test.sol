@@ -63,27 +63,24 @@ contract Roster_RevokeAgent_Test is RosterTestBase {
         assertEq(untouched.perPeriodCap, before.perPeriodCap);
         assertEq(untouched.periodSpend, before.periodSpend);
         assertEq(untouched.periodStart, before.periodStart);
-        assertEq(untouched.earmarkedBalance, before.earmarkedBalance);
         assertEq(untouched.role, before.role);
         assertTrue(untouched.registered);
         assertTrue(untouched.active, "the other agent keeps working");
     }
 
     /// Revocation does not touch money. It stops future spends; it does not claw back what has
-    /// already been released, and it does not release the earmark either. `sweepUnspent` was
-    /// removed, so nothing reclaims stranded USDC — see DECISIONS.md 2026-09-09.
-    function test_DoesNotMoveOrReleaseFunds() public {
+    /// already been released. With one shared balance there is nothing of the agent's left in the
+    /// Roster to reclaim — the balance simply stays for everyone else.
+    function test_DoesNotMoveFunds() public {
         _spend(pricer, PRICER_PER_TX);
         uint256 agentBalance = usdc.balanceOf(pricer);
-        uint256 earmark = _agent(pricer).earmarkedBalance;
-        uint256 total = roster.totalEarmarked();
+        uint256 rosterBalance = _balance();
 
         vm.prank(owner);
         roster.revokeAgent(pricer);
 
         assertEq(usdc.balanceOf(pricer), agentBalance, "already-released funds stay put");
-        assertEq(_agent(pricer).earmarkedBalance, earmark, "the earmark is untouched");
-        assertEq(roster.totalEarmarked(), total);
+        assertEq(_balance(), rosterBalance, "the shared balance is untouched");
     }
 
     /// Revoking twice is a no-op rather than a revert — an owner hitting the kill switch again

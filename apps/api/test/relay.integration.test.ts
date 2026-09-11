@@ -37,7 +37,6 @@ describe('relay', { skip: available ? false : 'anvil not installed — install F
         role: 'Comparable-listing research',
         perTxCap: usdc(10).toString(),
         perPeriodCap: usdc(400).toString(),
-        fundAmount: usdc(100).toString(),
       },
     })
     assert.equal(status, 201, `hire failed: ${JSON.stringify(body)}`)

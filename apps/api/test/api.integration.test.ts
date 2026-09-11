@@ -211,73 +211,56 @@ describe('roster api', { skip: available ? false : 'anvil not installed — inst
     assert.equal((await response.json()).error.code, 'invalid_json')
   })
 
-  // ─── funding (§4.6) ───────────────────────────────────────────────────────
+  // ─── the shared balance (§4.6) ────────────────────────────────────────────
 
-  it('earmarks USDC the Roster already holds', async () => {
+  it('reports the roster balance — no per-agent allocation anywhere', async () => {
     await h.deployment.mint(h.deployment.roster, usdc(1000))
 
-    const { status, body } = await h.request('POST', `/agents/${pricerId}/fund`, {
-      body: { amount: usdc(500).toString() },
-    })
-
-    assert.equal(status, 200)
-    assert.equal(body.agent.earmarkedBalance, usdc(500).toString())
-  })
-
-  it("surfaces the contract's InsufficientTreasury rather than a generic failure", async () => {
-    // 1000 minted, 500 already earmarked — 600 more cannot be covered.
-    const { status, body } = await h.request('POST', `/agents/${pricerId}/fund`, {
-      body: { amount: usdc(600).toString() },
-    })
-
-    assert.equal(status, 400)
-    assert.equal(body.error.code, 'InsufficientTreasury')
-    assert.match(body.error.message, /Fund it first/)
-  })
-
-  // ─── defund and withdraw ──────────────────────────────────────────────────
-
-  it('reports treasury headroom', async () => {
     const { status, body } = await h.request('GET', '/treasury')
 
     assert.equal(status, 200)
-    assert.equal(body.treasury.earmarked, usdc(500).toString())
-    assert.equal(body.treasury.unallocated, usdc(500).toString())
     assert.equal(body.treasury.balance, usdc(1000).toString())
+    assert.match(body.treasury.ownerBalance, /^\d+$/)
+    assert.equal(body.treasury.earmarked, undefined)
+
+    const agent = await h.request('GET', `/agents/${pricerId}`)
+    assert.equal(agent.body.agent.earmarkedBalance, undefined, 'an agent has limits, not a balance')
   })
 
-  it('returns an earmark to the treasury, making it re-earmarkable', async () => {
-    const defunded = await h.request('POST', `/agents/${pricerId}/defund`, {
-      body: { amount: usdc(200).toString() },
+  it("adds money from the owner's wallet, and refuses more than the wallet holds", async () => {
+    const owner = await h.deployment.publicClient.readContract({
+      address: h.deployment.roster,
+      abi: rosterAbi,
+      functionName: 'owner',
     })
+    await h.deployment.mint(owner, usdc(50))
 
-    assert.equal(defunded.status, 200)
-    assert.equal(defunded.body.agent.earmarkedBalance, usdc(300).toString())
+    const added = await h.request('POST', '/treasury/deposit', { body: { amount: usdc(50).toString() } })
+    assert.equal(added.status, 200)
+    assert.ok(added.body.transactionHash)
+    assert.equal(added.body.treasury.balance, usdc(1050).toString())
 
-    const treasury = await h.request('GET', '/treasury')
-    assert.equal(treasury.body.treasury.unallocated, usdc(700).toString())
-
-    // Put it back, so the rest of the suite runs against the same balances as before.
-    await h.request('POST', `/agents/${pricerId}/fund`, { body: { amount: usdc(200).toString() } })
+    const tooMuch = await h.request('POST', '/treasury/deposit', {
+      body: { amount: (BigInt(added.body.treasury.ownerBalance) + 1n).toString() },
+    })
+    assert.equal(tooMuch.status, 400)
+    assert.equal(tooMuch.body.error.code, 'insufficient_owner_funds')
   })
 
-  it('withdraws unallocated USDC to the owner, and refuses to touch an earmark', async () => {
+  it('withdraws to the owner, bounded by the balance and nothing else', async () => {
     const withdrawn = await h.request('POST', '/treasury/withdraw', {
       body: { amount: usdc(100).toString() },
     })
 
     assert.equal(withdrawn.status, 200)
-    assert.equal(withdrawn.body.unallocated, usdc(400).toString())
+    assert.equal(withdrawn.body.treasury.balance, usdc(950).toString())
 
     const tooMuch = await h.request('POST', '/treasury/withdraw', {
-      body: { amount: usdc(500).toString() },
+      body: { amount: usdc(951).toString() },
     })
-    assert.equal(tooMuch.status, 400)
-    assert.equal(tooMuch.body.error.code, 'InsufficientTreasury')
-
-    // The earmark is intact, so the agent can still spend.
-    const agent = await h.request('GET', `/agents/${pricerId}`)
-    assert.equal(agent.body.agent.earmarkedBalance, usdc(500).toString())
+    assert.equal(tooMuch.status, 409)
+    assert.equal(tooMuch.body.error.code, 'InsufficientBalance')
+    assert.match(tooMuch.body.error.message, /Add money/)
   })
 
   // ─── the over-cap path (§4.3) ─────────────────────────────────────────────
@@ -321,8 +304,10 @@ describe('roster api', { skip: available ? false : 'anvil not installed — inst
 
     const after = await h.request('GET', `/agents/${pricerId}`)
     assert.equal(after.body.agent.periodSpend, usdc(120).toString())
-    assert.equal(after.body.agent.earmarkedBalance, usdc(380).toString())
     assert.equal(after.body.agent.status, 'active', 'no longer holding anything')
+
+    const treasury = await h.request('GET', '/treasury')
+    assert.equal(treasury.body.treasury.balance, usdc(830).toString(), 'paid from the shared balance')
 
     const pending = await h.request('GET', '/pending')
     assert.deepEqual(pending.body.pending, [])
@@ -386,8 +371,7 @@ describe('roster api', { skip: available ? false : 'anvil not installed — inst
     // The revoked agent's next spend reverts...
     await assert.rejects(() => spendAs(h, pricerAddress, usdc(1), 'after revocation'))
 
-    // ...and the other agent, funded in the same block-height range, still works.
-    await h.request('POST', `/agents/${concierge.id}/fund`, { body: { amount: usdc(100).toString() } })
+    // ...and the other agent, spending from the same balance, still works.
     await spendAs(h, conciergeAddress, usdc(5), 'Buyer SMS')
 
     const after = await h.request('GET', '/agents')

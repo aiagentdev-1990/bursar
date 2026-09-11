@@ -15,7 +15,6 @@ interface IRoster {
         uint256 perPeriodCap; // max USDC cumulative within one period
         uint256 periodSpend; // spent so far in the current period
         uint256 periodStart; // unix ts the current period began
-        uint256 earmarkedBalance; // USDC held by the contract for this agent
         string role; // dashboard label only — no enforcement depends on it
         bool registered; // true after hireAgent; never cleared, so a revoked agent
         // is still distinguishable from one that never existed
@@ -34,8 +33,6 @@ interface IRoster {
 
     event RosterInitialized(address indexed owner);
     event AgentRegistered(address indexed agent, uint256 perTxCap, uint256 perPeriodCap, string role);
-    event AllowanceFunded(address indexed agent, uint256 amount);
-    event AllowanceDefunded(address indexed agent, uint256 amount);
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event SpendExecuted(address indexed agent, address indexed payee, uint256 amount, bytes memo);
     event PaymentPending(
@@ -53,13 +50,13 @@ interface IRoster {
     error AgentNotActive();
     error AgentAlreadyRegistered();
     error UnknownAgent();
-    error InsufficientEarmarkedBalance();
     error RequestNotOpen();
     error AlreadyInitialized();
     error ZeroAddress();
     error ZeroCap();
-    /// @notice fundAgent would earmark more USDC than this Roster actually holds.
-    error InsufficientTreasury();
+    /// @notice The Roster holds less USDC than this spend, approval or withdrawal needs. Caps say
+    ///         how much an agent may spend; the balance says how much there is to spend.
+    error InsufficientBalance();
     /// @notice executeSpendFor: the agent's signed deadline has passed.
     error SignatureExpired();
     /// @notice executeSpendFor: the signature is malformed, already used, for another Roster, or
@@ -77,18 +74,8 @@ interface IRoster {
     /// @notice §4.1 — register an agent's wallet, both caps, and its role label.
     function hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap, string calldata role) external;
 
-    /// @notice §4.6 — earmark USDC this Roster already holds for one agent. It moves no tokens:
-    ///         funding arrives at the Roster address first (Bridge Kit delivers it there), and
-    ///         this allocates it. Reverts if the balance can't cover every agent's earmark.
-    function fundAgent(address agent, uint256 amount) external;
-
-    /// @notice The counterpart to `fundAgent`: returns an agent's earmark to the unallocated
-    ///         treasury so it can be re-earmarked or withdrawn. Without it, revoking a funded
-    ///         agent would strand its remaining budget permanently.
-    function defundAgent(address agent, uint256 amount) external;
-
-    /// @notice Moves unallocated USDC out of the Roster. Bounded by `balance - totalEarmarked`,
-    ///         so it can never touch USDC an agent is still entitled to.
+    /// @notice Moves USDC out of the Roster. There is no deposit function: §4.6's funding is any
+    ///         USDC transfer to this address, and every agent spends from that one balance.
     function withdrawTreasury(address to, uint256 amount) external;
 
     /// @notice §4.3 — release a held request's funds to the agent's wallet.
@@ -106,8 +93,9 @@ interface IRoster {
     // ─── agent actions ────────────────────────────────────────────────────────
 
     /// @notice §4.2/§4.3 — the core call. Lazily resets the period counter if the boundary has
-    ///         passed, then checks both caps. In cap: transfers to the agent's wallet, returns
-    ///         (true, 0). Over cap: opens a pending request, moves nothing, returns (false, requestId).
+    ///         passed, then checks both caps. In cap: transfers to the agent's wallet from the
+    ///         Roster's balance, returns (true, 0), or reverts `InsufficientBalance` if the balance
+    ///         is short. Over cap: opens a pending request, moves nothing, returns (false, requestId).
     function executeSpend(uint256 amount, address payee, bytes calldata memo)
         external
         returns (bool executed, uint256 requestId);
@@ -134,8 +122,7 @@ interface IRoster {
     function owner() external view returns (address);
     /// @notice Fixed for every agent on every Roster. See DECISIONS.md 2026-09-09.
     function PERIOD_LENGTH() external view returns (uint256);
-    function totalEarmarked() external view returns (uint256);
-    /// @notice Caps, role, active status, current period spend, earmarked balance.
+    /// @notice Caps, role, active status, current period spend.
     /// @dev Reports the period the contract would enforce *right now*: if the boundary has
     ///      passed since the agent last spent, `periodSpend` reads zero and `periodStart` reads
     ///      the rolled value, exactly as the next `executeSpend` would set them.

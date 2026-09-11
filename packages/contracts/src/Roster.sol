@@ -14,10 +14,11 @@ import {IRoster} from "./IRoster.sol";
 ///         bearing (CLAUDE.md, "Non-negotiables"). Deployed as a minimal-proxy clone by
 ///         RosterFactory, so it is initialized rather than constructed.
 ///
-///         The contract is also the treasury. USDC arrives at this address (§4.6), the owner
-///         earmarks it per agent with `fundAgent`, and `executeSpend` releases it to the agent's
-///         own wallet at the point of use — never ahead of time — so the agent holds nothing
-///         standing. See DECISIONS.md 2026-09-08.
+///         The contract is also the treasury: one shared balance every agent spends from, like a
+///         company account behind a set of expense cards. USDC arrives at this address (§4.6) and
+///         `executeSpend` releases it to the agent's own wallet at the point of use — never ahead
+///         of time — so the agent holds nothing standing. The caps are each agent's limit; the
+///         balance is the one pool. See DECISIONS.md 2026-09-08 and 2026-09-11.
 ///
 ///         An agent can ask for a release two ways: `executeSpend`, sent from its own wallet, or
 ///         `executeSpendFor`, which it signs and anyone relays. The relayed path exists because
@@ -46,12 +47,6 @@ contract Roster is IRoster, EIP712, Nonces {
 
     /// @inheritdoc IRoster
     address public owner;
-
-    /// @inheritdoc IRoster
-    /// @dev The sum of every agent's earmarkedBalance. Guards against earmarking the same USDC
-    ///      to two agents, which would let the second spend fail at transfer time instead of at
-    ///      the point the owner made the mistake.
-    uint256 public totalEarmarked;
 
     uint256 public nextRequestId;
 
@@ -118,44 +113,12 @@ contract Roster is IRoster, EIP712, Nonces {
     }
 
     /// @inheritdoc IRoster
-    function fundAgent(address agent, uint256 amount) external onlyOwner {
-        AgentInfo storage info = _agents[agent];
-        if (!info.registered) revert UnknownAgent();
-
-        // Moves no tokens — the USDC is already here. This only allocates it, and only as far as
-        // the balance actually stretches.
-        uint256 earmarked = totalEarmarked + amount;
-        if (USDC.balanceOf(address(this)) < earmarked) revert InsufficientTreasury();
-
-        info.earmarkedBalance += amount;
-        totalEarmarked = earmarked;
-
-        emit AllowanceFunded(agent, amount);
-    }
-
-    /// @inheritdoc IRoster
-    function defundAgent(address agent, uint256 amount) external onlyOwner {
-        AgentInfo storage info = _agents[agent];
-        if (!info.registered) revert UnknownAgent();
-        if (info.earmarkedBalance < amount) revert InsufficientEarmarkedBalance();
-
-        // Mirror of fundAgent: no tokens move, the allocation is just released back into the
-        // unallocated pool. Deliberately allowed for a revoked agent — that is the case it
-        // exists for.
-        info.earmarkedBalance -= amount;
-        totalEarmarked -= amount;
-
-        emit AllowanceDefunded(agent, amount);
-    }
-
-    /// @inheritdoc IRoster
+    /// @dev Unbounded by anything but the balance: no agent is owed a share of it. A cap is
+    ///      permission to spend, not a claim on funds, so withdrawing everything simply means the
+    ///      next in-cap spend reverts `InsufficientBalance` until the owner adds more.
     function withdrawTreasury(address to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
-
-        // Only what no agent is entitled to. An agent's earmark is a promise this function
-        // cannot break, which is what keeps `balance >= totalEarmarked` an invariant.
-        uint256 unallocated = USDC.balanceOf(address(this)) - totalEarmarked;
-        if (unallocated < amount) revert InsufficientTreasury();
+        if (USDC.balanceOf(address(this)) < amount) revert InsufficientBalance();
 
         USDC.safeTransfer(to, amount);
 
@@ -327,14 +290,14 @@ contract Roster is IRoster, EIP712, Nonces {
         info.periodSpend = periodSpend;
     }
 
-    /// @dev The one place funds leave this contract. Charging the period and debiting the
-    ///      earmark happen before the transfer, so a reentrant token cannot see stale state.
+    /// @dev The one place agent funds leave this contract. Checked explicitly rather than left to
+    ///      the token's own revert, so an empty balance surfaces as one error the API and the
+    ///      skills can name. Charging the period happens before the transfer, so a reentrant
+    ///      token cannot see stale state.
     function _release(AgentInfo storage info, address agent, address payee, uint256 amount, bytes memory memo) private {
-        if (info.earmarkedBalance < amount) revert InsufficientEarmarkedBalance();
+        if (USDC.balanceOf(address(this)) < amount) revert InsufficientBalance();
 
         info.periodSpend += amount;
-        info.earmarkedBalance -= amount;
-        totalEarmarked -= amount;
 
         // Released to the agent's own wallet, which signs the x402 payment itself (§4.2).
         USDC.safeTransfer(agent, amount);

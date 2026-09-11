@@ -20,8 +20,7 @@ contract Roster_ApprovePending_Test is RosterTestBase {
         roster.approvePending(requestId);
 
         assertEq(usdc.balanceOf(pricer), OVER_CAP);
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK - OVER_CAP);
-        assertEq(roster.totalEarmarked(), EARMARK * 2 - OVER_CAP);
+        assertEq(_balance(), TREASURY - OVER_CAP, "drawn from the shared balance");
     }
 
     /// The approval overrides the cap for this one payment, but the spend still counts against
@@ -110,15 +109,21 @@ contract Roster_ApprovePending_Test is RosterTestBase {
         assertEq(usdc.balanceOf(pricer), 0, "no funds escape a revoked agent");
     }
 
-    function test_RevertWhen_TheEarmarkNoLongerCoversIt() public {
-        // Spend the earmark down below the held amount before approving.
-        vm.prank(owner);
-        roster.updateCaps(pricer, EARMARK, EARMARK);
-        _spend(pricer, EARMARK - OVER_CAP + 1);
+    /// The request survives the failed approval, so the owner can add money and approve again.
+    function test_RevertWhen_TheBalanceNoLongerCoversIt_AndTheRequestStaysOpen() public {
+        vm.startPrank(owner);
+        roster.withdrawTreasury(owner, TREASURY - OVER_CAP + 1);
 
-        vm.prank(owner);
-        vm.expectRevert(IRoster.InsufficientEarmarkedBalance.selector);
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
         roster.approvePending(requestId);
+        vm.stopPrank();
+
+        assertTrue(roster.getPendingRequest(requestId).open, "still waiting for the owner");
+
+        usdc.mint(address(roster), 1);
+        vm.prank(owner);
+        roster.approvePending(requestId);
+        assertEq(usdc.balanceOf(pricer), OVER_CAP);
     }
 
     function test_RevertWhen_TheCallerIsNotTheOwner() public {

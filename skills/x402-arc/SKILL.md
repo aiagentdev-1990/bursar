@@ -88,6 +88,7 @@ if (existsSync(rosterFile)) {
     args: [address],
   })
   out.roster = {
+    registered: a.registered,
     active: a.active,
     perTxCap: usdc(a.perTxCap),
     periodCap: usdc(a.perPeriodCap),
@@ -121,11 +122,10 @@ const dir = join(homedir(), '.x402')
 const account = privateKeyToAccount(readFileSync(join(dir, 'wallet.key'), 'utf8').trim())
 const roster = readFileSync(join(dir, 'roster'), 'utf8').trim()
 const relay = readFileSync(join(dir, 'relay'), 'utf8').trim().replace(/\/$/, '')
-const headers = { 'ngrok-skip-browser-warning': '1' }
 const done = (o) => { console.log(JSON.stringify(o, null, 2)); process.exit(0) }
 
 // 1. Quote: ask without paying.
-const quote = await fetch(url, { headers })
+const quote = await fetch(url)
 if (quote.status !== 402) done({ outcome: 'NOT_PAYWALLED', status: quote.status, body: await quote.text() })
 const required = JSON.parse(Buffer.from(quote.headers.get('payment-required'), 'base64').toString())
 const offer = required.accepts.find(
@@ -175,7 +175,7 @@ let relayed
 try {
   relayed = await fetch(`${relay}/relay/spend`, {
     method: 'POST',
-    headers: { ...headers, 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       agent: spend.agent,
       amount: spend.amount.toString(),
@@ -206,7 +206,7 @@ const releaseTx = answer.transactionHash
 const client = new x402Client().register('eip155:*', new ExactEvmScheme(account)).setSpendControls({
   allowedAssets: [{ network: ARC, asset: USDC, maxAmountPerPayment: offer.amount }],
 })
-const res = await wrapFetchWithPayment(fetch, client)(url, { headers })
+const res = await wrapFetchWithPayment(fetch, client)(url)
 const receipt = res.headers.get('payment-response')
 done({
   outcome: 'PAID',
@@ -237,7 +237,7 @@ const client = new x402Client().register('eip155:*', new ExactEvmScheme(account)
     { network: 'eip155:5042002', asset: '0x3600000000000000000000000000000000000000', maxAmountPerPayment: max },
   ],
 })
-const res = await wrapFetchWithPayment(fetch, client)(url, { headers: { 'ngrok-skip-browser-warning': '1' } })
+const res = await wrapFetchWithPayment(fetch, client)(url)
 const receipt = res.headers.get('payment-response')
 console.log(JSON.stringify({
   status: res.status,
@@ -252,13 +252,17 @@ Then run `node ~/x402/wallet.mjs` and report the address it prints, on a line of
 WALLET_ADDRESS: 0x...
 ```
 
-Wait to be told you are on the roster. You will be given the Roster contract address and your
-owner's relay URL; save both:
+Then save your owner's defaults — the Roster contract that holds your allowance, and the relay
+that submits your spend requests:
 
 ```bash
-echo '<roster address>' > ~/.x402/roster
-echo '<relay url>' > ~/.x402/relay
+echo '0x17a021A777A231509e6ddb13772CD32AB10ad258' > ~/.x402/roster
+echo 'https://api-production-faaef.up.railway.app' > ~/.x402/relay
 ```
+
+Wait to be told you are on the roster. If you are given a different Roster address or relay URL,
+save it over the default with the same command. Until then, `node balance.mjs` shows
+`registered: false` — that means you are not on the roster yet, not that you were revoked.
 
 You will not be sent any gas, and you do not need any.
 

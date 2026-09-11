@@ -69,7 +69,7 @@ Do not invent an answer to these — flag them and ask.
 
 1. Whether Circle's Agent Stack has a testnet-ready SDK on Arc, or whether §4.2's facilitator
    interaction has to be hand-rolled against the raw x402 spec.
-2. Whether `onlyAgent` binds to a plain address or has to resolve through ERC-8004.
+2. ~~Whether `onlyAgent` binds to a plain address or has to resolve through ERC-8004.~~ Settled 2026-09-11: a plain address, no ERC-8004 — see `docs/DECISIONS.md`.
 
 Checkpoint 2 in `docs/BACKLOG.md` (verify the facilitator by hand against one real service) blocks
 most of the rest. Front-load it.

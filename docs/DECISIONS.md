@@ -50,6 +50,29 @@ used by both the storage write and the view, so there is no second implementatio
 math to drift — which is the same reason the dashboard reads `getAgent` at all instead of
 recomputing spend from events.
 
+## 2026-09-11 — No ERC-8004 integration
+Evaluated in detail, including a working prototype on a fork of Arc testnet, and dropped. It adds
+nothing functional to Roster:
+
+- Enforcement — caps, period, revocation, approvals — runs on the Allowance Contract, keyed by
+  wallet address, and has to. Reading enforcement state from an external, upgradeable registry would
+  put a second failure mode inside the single point of enforcement (R4), and the kill switch must
+  never depend on one.
+- So the only field the registry could have taken over was `role`, which is display-only and which
+  the backend can hold just as well.
+- Its one real benefit — letting a counterparty check which roster an agent belongs to — needs
+  counterparties that look. None of the demo's do.
+- `setAgentWallet` required the agent's wallet to sign an EIP-712 message during hiring, which drove
+  most of the complexity in the onboarding design.
+
+Consequences: `onlyAgent` binds to a plain address (settles open question 2); `role` stays in
+`AgentInfo` along with the `Name|Role` convention; §4.1 no longer mints identities.
+
+If this is ever revisited, the verified facts: the IdentityRegistry is at
+`0x8004A818BFB912233c491871b3d84c89A494BD9e` on Arc testnet; `register` uses `_safeMint`, so a
+contract holding an identity must implement `onERC721Received`; `register` returns the `agentId`
+and emits `Registered`; `setAgentWallet` needs an EIP-712 `AgentWalletSet` signature from the wallet.
+
 ## 2026-09-09 — §5 amendment: funds must be able to leave the Roster
 Found by auditing the contract. `fundAgent` had no counterpart, and the Roster had no exit at
 all, so two things were permanently locked:
@@ -156,7 +179,6 @@ same `/api/v2/addresses/{contract}/logs` event stream.
 
 ## Open — see CLAUDE.md
 - Circle Agent Stack testnet SDK on Arc: real, or hand-roll x402?
-- Agent identity: plain address or ERC-8004?
 - Keep "payroll" (recurring top-up) or cut it?
 - The contract has no `name` field, but the hire form collects Name *and* Role as separate inputs.
   Either the backend stores the name off-chain keyed by agent address, or the `role` string carries
@@ -165,3 +187,5 @@ same `/api/v2/addresses/{contract}/logs` event stream.
 *(`periodLength` and `sweepUnspent`: both settled 2026-09-09 — see the contract-shape entry above.)*
 
 *(Three demo agents or two: settled 2026-09-09 — five on the roster, three driven live.)*
+
+*(Agent identity: settled 2026-09-11 — a plain address, no ERC-8004.)*

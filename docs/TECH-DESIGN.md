@@ -73,157 +73,81 @@ Five components own the system's behaviour:
 
 ### 4.1 Agent onboarding ("hire an agent")
 
-`hireAgent` registers the agent's ERC-8004 identity itself, in the same transaction that sets its
-caps. **The Roster contract owns the identity NFTs** — one roster is one team, and the team's
-contract is the natural holder of its members' credentials.
+Hiring provisions a **wallet** (Privy), an **allowance** (the Allowance Contract), and a **running
+instance** (Claude Managed Agents). The agent generates its own signing credential, so nothing
+else — the backend included — can act as it.
 
-#### What lives where
+No ERC-8004 identity. It was evaluated and dropped: it adds nothing functional to Roster. See
+DECISIONS.md 2026-09-11.
 
-Nothing is stored twice.
+#### Keys
 
-| Fact | Home |
-|---|---|
-| Both caps, period spend, period start, `active` | **Allowance Contract** — enforcement |
-| Earmarked balance, treasury | **Allowance Contract** — it is the treasury |
-| `agentId` | **Allowance Contract** — one `uint256`, returned by `register` |
-| Agent **name** and **role** | **ERC-8004 metadata**, via the `agentURI` |
-| Identity ↔ wallet binding | **ERC-8004** (`getAgentWallet`) |
-| Claude `session_id` | Backend store — not derivable from any chain |
+| Key | Held by | Can |
+|---|---|---|
+| Wallet key (secp256k1) | Privy, never leaves its enclave | Sign transactions |
+| Owner authorization key (P-256) | Roster backend | Create wallets, manage signers |
+| Signer authorization key (P-256) | The agent, generated in its sandbox | Ask Privy to sign for its own wallet only |
 
-`AgentInfo.role` is gone. It was a dynamic-length string in the enforcement contract holding a
-value the interface itself described as "dashboard label only". In its place is `agentId`: one
-word, one slot, and a pointer into a registry that is *designed* to hold names and roles and that
-other tools already read. The `"Name|Role"` delimiter hack disappears with it.
+A signer cannot change the wallet's owner or signers and cannot export its key. The agent is never
+given `PRIVY_APP_SECRET`: that secret is app-wide, so any agent holding it could transact from any
+other agent's wallet.
 
-#### The hire, in one transaction
+#### The flow
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Owner
     participant Backend as Roster Backend
+    participant Agent as Agent session (Claude)
     participant Privy
-    participant Wallet as Agent wallet
     participant Roster as Allowance Contract
-    participant Registry as ERC-8004 Registry
-    participant Claude as Claude Managed Agents
 
     Owner->>Backend: Hire (name, role, perTxCap, perPeriodCap)
-    Backend->>Privy: Create embedded wallet
-    Privy-->>Backend: Agent wallet address
-    Backend->>Wallet: Sign EIP-712 AgentWalletSet(agentId=0, wallet, roster, deadline)
-    Wallet-->>Backend: signature - no transaction, no gas
+    Backend->>Agent: create session - Agent config per role, cached, skill attached
+    Backend->>Agent: generate your key, reply with AGENT_PUBLIC_KEY
+    Note over Agent: generates a P-256 keypair<br/>private half stays in the sandbox
+    Agent-->>Backend: message: AGENT_PUBLIC_KEY base64 DER
+    Backend->>Backend: validate - P-256 SPKI prefix, exactly 91 bytes
 
-    Note over Backend,Registry: One transaction. Either all of this happens, or none of it.
-    Backend->>Roster: hireAgent(wallet, perTxCap, perPeriodCap, agentURI, deadline, signature)
-    Roster->>Registry: register(agentURI)
-    Registry-->>Roster: agentId - returned directly, no event parsing
-    Roster->>Registry: setAgentWallet(agentId, wallet, deadline, signature)
-    Roster->>Roster: store caps + agentId, active = true
-    Roster-->>Backend: AgentRegistered(agent, agentId, perTxCap, perPeriodCap)
+    Backend->>Privy: POST /v1/key_quorums (agent public key)
+    Backend->>Privy: POST /v1/wallets (owner = backend key, signer = agent quorum)
+    Privy-->>Backend: wallet id + address
+    Backend->>Backend: send native USDC for gas, 18 decimals
 
+    Backend->>Roster: hireAgent(wallet, perTxCap, perPeriodCap, name + role)
+    Roster-->>Backend: AgentRegistered - caps enforced from here
     opt opening earmark requested
         Backend->>Roster: fundAgent(wallet, amount)
     end
 
-    Note over Backend,Claude: Best effort. A hire that cannot start is still a capped agent.
-    Backend->>Claude: POST /v1/sessions, then a user event
+    Backend->>Agent: your walletAddress + privyWalletId
     Backend-->>Owner: Agent hired, capped, and running
 ```
 
-**Why this is simpler than provisioning identity from the backend.** One transaction instead of
-three. No orphan states: there is no longer a window where an identity exists without an
-allowance, or an allowance without an identity, so the whole "what happens if phase N fails" table
-collapses to "the hire reverted". And `register` *returns* the `agentId`, so the contract gets it
-directly — a backend calling it would have to parse the `Registered` event to learn the same thing.
+- **Hiring is asynchronous.** It waits on the agent's reply, and the agent may stall, decline, or
+  reply without a usable key. The backend validates the key strictly and times out.
+- **Nothing on-chain happens until the agent has produced a valid key.** A failure before
+  `hireAgent` leaves no agent on the roster. From `hireAgent` on, the caps are enforced.
+- **Two separate fundings.** Gas is native USDC at 18 decimals, sent to the wallet. The allowance
+  is ERC-20 USDC at 6 decimals, earmarked in the contract by `fundAgent`.
+- **Name and role** travel in the contract's `role` string as `Name|Role`.
 
-#### What the agent signs, and why it still needs no gas
+**Why Agent and Environment are separate from Session:** Agent and Environment are versioned,
+reusable resources — a role is defined once and every hire of that role reuses the same
+`agent_id`. A Session is one running instance, tied to one hire.
 
-`setAgentWallet` requires an EIP-712 signature from the wallet being bound, proving it consents.
-The Roster submits it; the agent only signs. The struct is:
-
-```
-AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256 deadline)
-```
-
-under domain `{name: "ERC8004IdentityRegistry", version: "1", chainId: 5042002, verifyingContract:
-<registry>}`, where `owner` is the **Roster contract address** — it is the NFT holder. ECDSA or
-ERC-1271, so a Privy smart wallet works as well as an EOA, and `deadline` must be within five
-minutes.
-
-One wrinkle the backend has to handle: the signature commits to an `agentId` that does not exist
-until `register` runs. The id is assigned by the registry, so the backend cannot know it in
-advance. `hireAgent` therefore signs over the id the registry is *about to* mint, obtained by
-simulating `register` — and the transaction reverts if the registry assigns a different one,
-because the signature will not verify. A race costs a retry, never a wrong binding.
-
-#### Wallets: two keys, two blast radii
-
-Privy holds every private key. Access to it is via **authorization keys**, which are bound to
-specific wallets — so a credential is scoped to one wallet, not to the whole Privy app.
-
-| Key | Held by | Can |
-|---|---|---|
-| **Owner** key | Roster backend | Create wallets, set and change policies, add or revoke signers |
-| **Signer** key | The agent's session, one per agent | Transact from **its own wallet only** |
-
-A signer *cannot* update the wallet's owner, its signers, or its policies, and cannot export the
-private key. So an agent can spend within its policy and cannot widen it.
-
-This is why the agent is not given `PRIVY_APP_SECRET`. That secret is app-wide: any agent holding
-it could enumerate every wallet in the app and transact from another agent's. The on-chain caps
-would still bind each wallet, but "each agent spends only its own budget" would not — and that is
-close enough to the product's central claim to matter.
-
-At hire time the backend also attaches a **Privy policy** restricting the wallet to calling the
-Roster contract on Arc. That is not the guarantee — the contract is — but it bounds what an agent
-can do with USDC already released to it, which is the exposure left open when `sweepUnspent` was
-removed.
-
-Revoking the signer key at Privy is therefore a second, independent kill switch alongside
-`revokeAgent`. The on-chain one remains the guarantee; this one is defence in depth.
-
-> Privy's own recipe has the backend hold the key and execute transactions for the agent. We
-> diverge deliberately: scoped signer keys make direct agent access safe, and §4.2's claim that the
-> agent pays with its own wallet and no owner involvement depends on it.
-
-#### The registry is in the hire path, and nowhere else
-
-`executeSpend` and `revokeAgent` never call the registry. The kill switch must not be able to fail
-because an external contract is paused, and the enforcement path must not gain a second way to
-break (risk R4). A broken registry means *no new hires*; every existing agent keeps spending under
-its caps and can still be revoked instantly.
-
-The registry address is immutable, set at factory construction alongside USDC, so it cannot be
-swapped under a live roster.
-
-#### Two facts verified on the fork, not assumed
-
-- `register` uses `_safeMint`, so a contract holding an identity **must** implement
-  `onERC721Received`. Without it the call reverts with `ERC721InvalidReceiver`. `Roster`
-  implements it.
-- A contract can hold an identity and bind an agent wallet to it. Both confirmed against live Arc
-  testnet state.
-
-**Why Agent and Environment are separate from Session:** Agent and Environment are versioned, reusable resources — a "Pricing research agent" role only needs to be defined once, then every hire of that role reuses the same `agent_id`. A Session is the actual running instance tied to one specific hire: one wallet, one allowance, one vault credential.
-
-**Two distinct caps, not one:** the `budget` object at session creation caps Claude's own token/compute spend for that session. This is separate from the Allowance Contract's per-transaction and per-period USDC caps — one bounds what the agent costs to run, the other bounds what it's allowed to pay out.
-
-**Creating a session doesn't start work.** The backend still has to send a user event (or pass `initial_events`) to kick the agent into motion.
+**Creating a session doesn't start work.** The backend has to send a user event to set it going.
 
 The owner never sees a wallet address or an agent ID. `hireAgent` is `onlyOwner`.
 
-#### Addresses (Arc testnet), verified on-chain
+#### Open
 
-| What | Address |
-|---|---|
-| IdentityRegistry (ERC-1967 proxy) | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
-| └ implementation `IdentityRegistryUpgradeable` | `0x7274e874CA62410a93Bd8bf61c69d8045E399c02` |
-| ReputationRegistry | `0x8004B663056A597Dffe9eCcC1965A193B7388713` |
-| ValidationRegistry | `0x8004Cb1BF31DAf7788923b405b754f57acEB4272` |
-
-Only the IdentityRegistry is used. Reputation and Validation are out of scope — Roster does not
-score an agent's output quality (PRD §9 excludes it explicitly).
+- **Key persistence.** The sandbox filesystem does not survive a session, and memory stores are
+  explicitly not for credentials. A second session finds no key.
+- **Privy authentication.** Whether `/v1/wallets/{id}/rpc` also needs Basic auth with the app
+  secret alongside the authorization signature is unverified. If it does, this design fails,
+  because the agent must never hold the app secret.
 
 ### 4.2 Autonomous payment, within cap
 
@@ -257,24 +181,11 @@ spend or a pending request is the agent's declaration of intent; the contract do
 and cannot enforce it. The cap is the guarantee, the destination is not, and owner-facing copy
 must not imply otherwise.
 
-**How the agent signs.** It does not hold a private key, and it could not: Managed Agents vault
-credentials are substituted at egress and are never visible to sandbox code, so there is no way to
-hand key material to the agent even if we wanted to. Instead the agent's session carries its
-wallet-scoped Privy **signer key** as a vault credential, and its payment skill calls Privy's REST
-API from inside the sandbox — `POST /v1/wallets/{id}/rpc` with `eth_sendTransaction` — to submit
-`executeSpend` and to sign the x402 payment header. Privy holds the key and signs; the agent never
-sees the credential; the transaction still originates from the agent's own wallet.
-
-This is why the payment path is a **skill and not a custom tool**. A Managed Agents custom tool
-call returns to *our* client code for execution, which would move the whole payment onto our
-backend and contradict both §6 and the rule that the backend never signs a payment on an agent's
-behalf. A skill runs in the agent's own sandbox, so the payment stays the agent's.
-
-The skill is uploaded once via the Skills API and referenced from each role's Agent config as
-`{ type: "custom", skill_id, version }`. It is adapted from Privy's published agentic-wallets
-skill, with the app-secret authentication replaced by the wallet-scoped signer key, and extended
-with the two things that skill has no reason to know: how to call `executeSpend` before retrying a
-402, and that a held payment is an expected outcome to report and work around, not an error.
+**How the agent signs.** The agent holds the P-256 authorization key it generated in §4.1; the
+wallet's blockchain key stays in Privy. Its `roster-payments` skill calls Privy from inside the
+sandbox — `POST /v1/wallets/{id}/rpc` with `eth_sendTransaction` — authenticating each request with
+that key, to submit `executeSpend` and to sign x402 payment headers. The skill is uploaded once
+via the Skills API and attached to each role's Agent config.
 
 **Timing matters.** `executeSpend` fires immediately before the agent retries the x402 request, not ahead of time as a batch top-up — that bounds the released-but-unspent window to a single request.
 
@@ -367,21 +278,14 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 
 ## Open technical questions
 
-0. **Awaiting a decision:** move agent name and role out of the Allowance Contract into ERC-8004
-   metadata, per §4.1's "what lives where". It removes the only non-enforcement field from
-   `AgentInfo`, removes the `"Name|Role"` delimiter hack, and shortens `hireAgent` — at the cost of
-   making ERC-8004 a required step in the hire flow rather than an optional badge. §4.1 is written
-   as though this is settled; §5 still lists the shipped signature. One of the two has to change.
 1. Does Circle's Agent Stack expose a testnet-ready SDK on Arc, or does §4.2's facilitator interaction need to be built against the raw x402 spec directly? *(Answered 2026-09-09: yes — `@circle-fin/x402-batching` v2 with `GatewayClient` / `BatchFacilitatorClient`. See the Gateway custody conflict noted against §4.2.)*
-2. Does `executeSpend`'s `onlyAgent` check bind to a plain contract address, or does agent identity need to resolve through ERC-8004? *(Implemented as a plain address; ERC-8004 is on the backlog's cut list and nothing in the contract assumes either answer.)*
+2. ~~Does `executeSpend`'s `onlyAgent` check bind to a plain contract address, or does agent identity need to resolve through ERC-8004?~~ *Settled 2026-09-11: a plain address. ERC-8004 was evaluated and dropped — DECISIONS.md.*
 
 ## 5. Smart contract functions
 
 | Function signature | Access control | Purpose |
 |---|---|---|
-| `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap, string calldata role)` | `onlyOwner` | **Shipped.** Registers a new agent's wallet, its two caps, and a role label. |
-| ↳ **proposed:** `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap, string calldata agentURI, uint256 deadline, bytes calldata signature)` | `onlyOwner` | Mints the agent's ERC-8004 identity, binds its wallet, and sets its caps in one transaction. `AgentInfo.role` (string) becomes `AgentInfo.agentId` (uint256). **Not yet implemented.** §4.1 |
-| ↳ **proposed:** `onERC721Received(...)` | Public | Required — the registry uses `_safeMint`, so a contract cannot hold an identity without it. |
+| `hireAgent(address agent, uint256 perTxCap, uint256 perPeriodCap, string calldata role)` | `onlyOwner` | Registers a new agent's wallet, its two caps, and its `Name\|Role` label. §4.1 |
 | `initialize(address owner)` | Once, by the factory | Sets the owner. Replaces a constructor, which a minimal proxy cannot run. |
 | `fundAgent(address agent, uint256 amount)` | `onlyOwner` | Earmarks USDC the Roster **already holds** for that agent. Moves no tokens. Reverts if the balance can't cover every earmark. §4.6 |
 | `executeSpend(uint256 amount, address payee, bytes calldata memo) returns (bool executed, uint256 requestId)` | `onlyAgent` | Checks both caps. If satisfied, transfers `amount` to the agent's own wallet and returns `executed = true`. If not, opens a pending request. §4.2, §4.3 |

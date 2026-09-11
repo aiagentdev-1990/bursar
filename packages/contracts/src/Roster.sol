@@ -50,8 +50,8 @@ contract Roster is IRoster {
         _;
     }
 
-    /// @dev Agent identity is a plain address. ERC-8004 is on the cut list; nothing here assumes
-    ///      either answer beyond "msg.sender is the registered wallet".
+    /// @dev Agent identity is a plain address: msg.sender must be the registered wallet. ERC-8004
+    ///      was evaluated and deliberately not integrated — see DECISIONS.md 2026-09-11.
     modifier onlyAgent() {
         AgentInfo storage agent = _agents[msg.sender];
         if (!agent.registered) revert NotAgent();

@@ -172,6 +172,6 @@ Arc's three tracks are alternatives within one slot, not stacked — realistical
 ## 13. Open questions
 
 1. Does Circle's Agent Stack have a testnet-ready SDK on Arc today, or does Agentic Economy eligibility only require the *shape* of the flow?
-2. What does "agent identity" mean for the demo — a plain address, or ERC-8004?
+2. ~~What does "agent identity" mean for the demo — a plain address, or ERC-8004?~~ Settled 2026-09-11: a plain address. ERC-8004 was evaluated and dropped.
 3. ~~Is three agents right for the demo?~~ Settled 2026-09-09: five on the roster, three driven live.
 4. Does "payroll" make the demo meaningfully better, or is it the metaphor being cute? If it doesn't change what the demo proves, cut it.

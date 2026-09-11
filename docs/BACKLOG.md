@@ -98,4 +98,4 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
 1. Payroll / recurring top-up (checkpoint 10) — open question 4 already suspects it doesn't change what the demo proves
 2. Third demo agent — two agents make the isolation point (open question 3)
 3. Bazantic recipe (checkpoint 12) — a whole $1,000 track, but only if 1–11 are solid
-4. ERC-8004 agent identity — plain address is fine unless time is free
+4. ~~ERC-8004 agent identity~~ — dropped 2026-09-11; adds no functional benefit (DECISIONS.md)

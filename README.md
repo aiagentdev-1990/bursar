@@ -29,7 +29,13 @@ pnpm api:dev                              # owner API on :8787 — contract read
 pnpm web:dev                              # dashboard on :3000, reads through the API
 pnpm --filter @roster/api seed            # fund the Roster, hire five agents, play a morning
 pnpm --filter @roster/api seed activity   # one more in-cap spend per agent
+pnpm --filter @roster/api drain           # defund every agent, withdraw the Roster to its owner
+pnpm --filter @roster/api sweep           # return USDC left in dev agent wallets to the owner
 ```
+
+Agents hold no gas: they sign spend requests and `POST /relay/spend` submits them, paying gas
+from `RELAYER_PRIVATE_KEY`. For an agent in a Managed Agents sandbox to reach it, the API has to
+be publicly reachable (a tunnel is fine) — localhost is not.
 
 The seed is idempotent against a given Roster: it hires nobody twice and plays the scripted
 morning only once. To deploy a fresh Roster instead:

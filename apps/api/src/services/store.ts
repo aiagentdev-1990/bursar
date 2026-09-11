@@ -2,7 +2,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
 /// Operational state that is not derivable from the chain: which Claude session belongs to which
-/// agent, and which Managed Agents Agent config backs which role.
+/// agent, which Managed Agents Agent config backs which role, and the progress of hires still in
+/// flight (so a restart resumes them instead of losing them).
 ///
 /// This is deliberately *not* a mirror of roster data. Names, roles, caps and spend all live
 /// on-chain or in the event log (see services/labels.ts for why). If this file is deleted the
@@ -27,6 +28,36 @@ export interface StoredAgent {
   createdAt: string
 }
 
+/// Where a hire has got to. Advances left to right; `failed` can follow any step.
+export type HireStatus = 'starting' | 'setting-up' | 'registering' | 'briefing' | 'active' | 'failed'
+
+export interface HireRecord {
+  id: string
+  name: string
+  role: string
+  /// USDC base units, as strings.
+  perTxCap: string
+  perPeriodCap: string
+  fundAmount?: string
+  /// The agent's first task, sent once it is on the roster.
+  briefing?: string
+  status: HireStatus
+  /// The step a failed hire was on.
+  failedAt?: HireStatus
+  /// Set once `hireAgent` has been mined. A failure after this leaves a registered agent whose
+  /// caps are enforced; a failure before it leaves nothing on-chain.
+  registered?: boolean
+  claudeAgentId?: string
+  sessionId?: string
+  traceUrl?: string
+  /// The address the agent's skill reported. Kept here, never returned by the API (§4.1).
+  wallet?: string
+  error?: string
+  warning?: string
+  createdAt: string
+  updatedAt: string
+}
+
 type Shape = {
   /// agent wallet address (lowercased) → what was provisioned for it.
   ///
@@ -40,9 +71,11 @@ type Shape = {
   sessions: Record<string, string>
   /// agent wallet address (lowercased) → private key. Local wallet provider only; see wallets.ts.
   localKeys: Record<string, string>
+  /// hire id → its progress. See services/hires.ts.
+  hires: Record<string, HireRecord>
 }
 
-const EMPTY: Shape = { agents: {}, agentConfigs: {}, sessions: {}, localKeys: {} }
+const EMPTY: Shape = { agents: {}, agentConfigs: {}, sessions: {}, localKeys: {}, hires: {} }
 
 function read(): Shape {
   if (!existsSync(FILE)) return structuredClone(EMPTY)
@@ -102,5 +135,23 @@ export const store = {
   /// never registered, or were registered on a Roster since retired.
   localKeyWallets(): string[] {
     return Object.keys(read().localKeys)
+  },
+
+  putHire(hire: HireRecord) {
+    const state = read()
+    state.hires[hire.id] = hire
+    write(state)
+  },
+  getHire(id: string): HireRecord | undefined {
+    return read().hires[id]
+  },
+  /// Newest first.
+  listHires(): HireRecord[] {
+    return Object.values(read().hires).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  },
+  deleteHire(id: string) {
+    const state = read()
+    delete state.hires[id]
+    write(state)
   },
 }

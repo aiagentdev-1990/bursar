@@ -10,6 +10,41 @@ import type { Category } from './categories'
 
 export type AgentStatus = 'active' | 'needs-review' | 'revoked'
 export type PaymentStatus = 'settled' | 'held' | 'rejected'
+export type HireStatus = 'starting' | 'setting-up' | 'registering' | 'briefing' | 'active' | 'failed'
+
+/** A hire still in flight, or one that failed and hasn't been dismissed. */
+export interface Hire {
+  id: string
+  name: string
+  role: string
+  status: HireStatus
+  failedAt?: HireStatus
+  /** Whether its caps reached the chain. Decides what a failure message has to say. */
+  registered: boolean
+  error?: string
+  /** The agent's Claude session, to watch it set itself up. */
+  traceUrl?: string
+}
+
+/** One line on where a hire has got to — the owner is watching it happen. */
+export function hireProgress(hire: Hire): string {
+  switch (hire.status) {
+    case 'starting':
+      return 'Creating the agent and its session…'
+    case 'setting-up':
+      return 'Setting up its wallet. This usually takes a minute or two.'
+    case 'registering':
+      return 'Registering its caps on-chain…'
+    case 'briefing':
+      return 'Handing it the roster details…'
+    case 'active':
+      return 'On the roster.'
+    case 'failed':
+      return `${hire.error ?? 'Something went wrong.'} ${
+        hire.registered ? 'It is registered on-chain, with its caps enforced.' : 'Nothing was registered on-chain.'
+      }`
+  }
+}
 
 export interface Agent {
   /** Opaque API handle. The owner never sees a wallet address or an agent id (§4.1) — this is a

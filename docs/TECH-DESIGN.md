@@ -348,7 +348,9 @@ Owner-authenticated, except `POST /relay/spend`. Agents call only that one, carr
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /agents` | Hire a new agent — full §4.1 flow. |
+| `POST /agents` | Hire a new agent — full §4.1 flow. Answers `202` with a hire record; a background job runs the steps (DECISIONS.md 2026-09-11). |
+| `GET /agents/hires` | Hires in flight, with the step each has reached; failed ones say whether anything reached the chain. |
+| `DELETE /agents/hires/{id}` | Dismisses a finished hire. A hire still running can't be dismissed. |
 | `GET /agents` | List every agent with role, budget status, last activity. |
 | `GET /agents/{id}` | Single agent detail. |
 | `PATCH /agents/{id}/caps` | Calls `updateCaps`. |

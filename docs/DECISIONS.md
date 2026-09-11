@@ -2,6 +2,23 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-11 — Hiring runs as a background job
+`POST /agents` answers `202` at once with a hire record. A job (`apps/api/src/services/hires.ts`)
+then creates the agent and its session, waits for the wallet its skill reports, registers and
+funds it, and briefs it. The dashboard's hire form submits and closes; the roster page shows a
+progress row per hire and refreshes itself until it finishes.
+
+- **Each step is recorded in the store** (on the Railway volume) as it completes, so a restart or
+  redeploy resumes a hire from its last completed step instead of losing it. The registering step
+  reads the chain first, so a resumed hire never registers or funds twice.
+- **A failure says where it stopped,** and whether anything reached the chain: before
+  registration, nothing did.
+- **Owner writes go through one queue.** Two hires finishing together, or a hire landing during an
+  approval, would otherwise collide on the owner's nonce.
+- **Without a Claude runtime (tests, dev) the hire stays synchronous** — there is nothing to wait on.
+- **The hire form gains an optional opening budget.** Without one a new agent cannot spend until
+  the owner funds it, which made a freshly hired agent look broken.
+
 ## 2026-09-11 — Hiring: a new agent per hire, and the agent makes its own wallet
 `POST /agents` now runs in this order: create a Managed Agents **Agent** for this hire with the
 x402-arc skill attached (pinned to a version), start a session on it, let the skill's setup create

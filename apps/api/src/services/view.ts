@@ -1,5 +1,6 @@
 import { hexToString, type Address, type Hex } from 'viem'
 import type { AgentInfo } from '../chain/roster.js'
+import type { HireRecord, HireStatus } from './store.js'
 import type { OpenRequest, RosterEvent } from './blockscout.js'
 import { decodeLabel } from './labels.js'
 import { agentId } from './ids.js'
@@ -13,6 +14,46 @@ import { agentId } from './ids.js'
 ///   No wallet addresses and no agent ids in any response body.
 
 export type AgentStatus = 'active' | 'needs-review' | 'revoked'
+
+/// A hire in flight (services/hires.ts). The wallet it is hiring is never included; `agentId` is
+/// the same opaque handle GET /agents uses, set once the wallet is known.
+export interface HireView {
+  id: string
+  name: string
+  role: string
+  perTxCap: string
+  perPeriodCap: string
+  fundAmount?: string
+  status: HireStatus
+  failedAt?: HireStatus
+  registered: boolean
+  error?: string
+  warning?: string
+  traceUrl?: string
+  agentId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export function toHireView(hire: HireRecord): HireView {
+  return {
+    id: hire.id,
+    name: hire.name,
+    role: hire.role,
+    perTxCap: hire.perTxCap,
+    perPeriodCap: hire.perPeriodCap,
+    fundAmount: hire.fundAmount,
+    status: hire.status,
+    failedAt: hire.failedAt,
+    registered: hire.registered === true,
+    error: hire.error,
+    warning: hire.warning,
+    traceUrl: hire.traceUrl,
+    agentId: hire.wallet ? agentId(hire.wallet as Address) : undefined,
+    createdAt: hire.createdAt,
+    updatedAt: hire.updatedAt,
+  }
+}
 
 export interface AgentView {
   id: string

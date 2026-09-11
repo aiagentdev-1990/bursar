@@ -27,8 +27,13 @@ export function usd(base: bigint): string {
 /**
  * Secondary position only — round cap figures that the mockups render bare: `$400 cap`,
  * `of $2,250 committed`, `UNSPENT $724`. Never use this for a transaction amount.
+ *
+ * Bare only when the figure really is whole dollars; anything with cents falls back to `usd`.
+ * Live caps are set by the owner, not the mockups — a $1.50 cap rendered as "$2 cap" would
+ * misstate the limit the contract is actually enforcing.
  */
 export function usdWhole(base: bigint): string {
+  if (base % SCALE !== 0n) return usd(base)
   const neg = base < 0n
   const abs = neg ? -base : base
   let whole = abs / SCALE

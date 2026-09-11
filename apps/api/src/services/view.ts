@@ -85,6 +85,9 @@ export function toPendingView(request: OpenRequest, info: AgentInfo): PendingVie
 
 export interface ActivityView {
   type: RosterEvent['name']
+  /// Set on PaymentPending / PendingApproved / PendingRejected, so a reader can tell which held
+  /// request a settlement closed without a second call.
+  requestId?: string
   agentId?: string
   agentName?: string
   payee?: Address
@@ -101,9 +104,11 @@ export function toActivityView(
   const agent = event.args.agent as Address | undefined
   const amount = event.args.amount as bigint | undefined
   const memo = event.args.memo as Hex | undefined
+  const requestId = event.args.requestId as bigint | undefined
 
   return {
     type: event.name,
+    requestId: requestId !== undefined ? requestId.toString() : undefined,
     agentId: agent ? agentId(agent) : undefined,
     agentName: agent ? nameFor(agent) : undefined,
     payee: event.args.payee as Address | undefined,

@@ -116,9 +116,12 @@ function tryDecode(log: BlockscoutLog): RosterEvent | undefined {
 
 /// The roster's membership. There is deliberately no on-chain enumeration — `revokeAgent` must
 /// never loop over agents — so the event log is where the list of agents comes from.
+///
+/// In hire order, oldest first. The log arrives newest first, which would reshuffle the roster
+/// table every time someone new is hired.
 export function agentAddressesFrom(events: RosterEvent[]): Address[] {
   const seen = new Set<Address>()
-  for (const event of events) {
+  for (const event of [...events].reverse()) {
     if (event.name === 'AgentRegistered') seen.add(event.args.agent as Address)
   }
   return [...seen]

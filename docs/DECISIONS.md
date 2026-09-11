@@ -2,6 +2,39 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-11 — Deployed; the dashboard reads live state through apps/api
+**Deployment (Arc testnet, block 61507239, source verified on ArcScan):**
+
+| | Address |
+|---|---|
+| Roster — the demo owner's team (`ROSTER_CONTRACT_ADDRESS`) | `0x3BcC5Ff272F72c2a770D5E031699CFCe70287d80` |
+| RosterFactory (`ROSTER_FACTORY_ADDRESS`) | `0xFfF59e42eEF09D6859b8Adc2b8D8679BF849b40D` |
+| Roster implementation | `0xFAA5047030cA685093B376F15cAb6Cb736673252` |
+| Owner / deployer | `0x1BAB12dd29E89455752613055EC6036eD6c17ccf` |
+
+**ArcScan is Blockscout.** `/api/v2/addresses/{addr}/logs` answers in the shape `apps/api`
+already decodes, `block_timestamp` included. That was checkpoint 9's first question; it is now
+`BLOCKSCOUT_API_URL`'s default.
+
+**The web app never reads the chain or Blockscout itself.** It calls `apps/api` from server
+components, and approve/reject are server actions. Two reasons: the owner token stays on the Next
+server instead of shipping to the browser, and there is exactly one implementation of the
+events-to-roster derivation (membership, open requests, names from `Name|Role`) rather than a
+second one in the browser that could drift from it. §4.5's split still holds — per-agent state
+is `getAgent`, history is the event log.
+
+**Demo figures are testnet-scale.** The mockup caps ($400, $900 …) would need ~$2,250 in the
+treasury; the deployer holds ~$19. `apps/api/scripts/seed.ts` keeps the mockups' *shape* — five
+agents, Runner holding an over-cap request while the others spend normally — with caps in cents
+that the treasury can actually back. Consequence for the UI: `usdWhole` renders bare dollars only
+for whole-dollar figures and falls back to cents otherwise, so a $1.50 cap is never shown as
+"$2 cap" — the screen must not state a different limit than the contract enforces.
+
+**Payee names ride in the memo as `Payee — note`.** The contract records a payee address and
+nothing else, and the owner should not be reading addresses. The dashboard splits the memo on
+` — ` and falls back to a shortened address when an agent didn't follow the convention.
+Presentation only — the payee is still advisory (2026-09-09 below).
+
 ## 2026-09-09 — The payee is advisory, and the UI now says so
 Found by auditing the contract. `executeSpend` and `approvePending` both transfer to the agent's
 own wallet — never to the payee, which the agent then pays itself over x402 (§4.2, and the

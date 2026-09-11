@@ -19,6 +19,25 @@ pnpm test
 `.env.example` lists every credential the system needs, grouped by whether it is required now,
 needed for a specific checkpoint, or not on the critical path yet.
 
+## Running it
+
+The contracts are deployed on Arc testnet — addresses in `docs/DECISIONS.md` (2026-09-11) and in
+`.env` as `ROSTER_CONTRACT_ADDRESS` / `ROSTER_FACTORY_ADDRESS`.
+
+```bash
+pnpm api:dev                              # owner API on :8787 — contract reads + ArcScan history
+pnpm web:dev                              # dashboard on :3000, reads through the API
+pnpm --filter @roster/api seed            # fund the Roster, hire five agents, play a morning
+pnpm --filter @roster/api seed activity   # one more in-cap spend per agent
+```
+
+The seed is idempotent against a given Roster: it hires nobody twice and plays the scripted
+morning only once. To deploy a fresh Roster instead:
+
+```bash
+cd packages/contracts && forge script script/Deploy.s.sol:Deploy --rpc-url arc_testnet --broadcast
+```
+
 ## Testing
 
 ```bash

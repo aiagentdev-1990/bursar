@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useState, type ReactNode } from 'react'
 import { HireAgentModal } from './HireAgentModal'
-import { ORG_NAME } from '@/lib/mock-data'
+import { ORG_NAME } from '@/lib/org'
 
 const NAV = [
   { href: '/', label: 'Roster' },

@@ -77,6 +77,31 @@ async function environmentId(): Promise<string> {
   return environment.id
 }
 
+/// A P-256 public key in base64 DER (SPKI) form is always 91 bytes, and its first 26 bytes are a
+/// fixed algorithm identifier — which base64-encodes to this constant prefix. Checking both makes
+/// a malformed or hallucinated key fail here rather than at Privy.
+const P256_SPKI_PREFIX = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE'
+const P256_SPKI_BYTES = 91
+
+export class AgentKeyNotProvided extends Error {}
+
+export function parseAgentPublicKey(text: string): string {
+  const marked = text.match(/AGENT_PUBLIC_KEY:\s*([A-Za-z0-9+/=]{80,200})/)
+  const candidate = marked?.[1] ?? text.match(new RegExp(`${P256_SPKI_PREFIX}[A-Za-z0-9+/]+=*`))?.[0]
+
+  if (!candidate) throw new AgentKeyNotProvided('no public key found in the agent’s reply')
+  if (!candidate.startsWith(P256_SPKI_PREFIX)) {
+    throw new AgentKeyNotProvided('key is not a P-256 SPKI public key')
+  }
+
+  const bytes = Buffer.from(candidate, 'base64')
+  if (bytes.length !== P256_SPKI_BYTES) {
+    throw new AgentKeyNotProvided(`expected ${P256_SPKI_BYTES} bytes, got ${bytes.length}`)
+  }
+
+  return candidate
+}
+
 export interface StartedSession {
   claudeAgentId: string
   sessionId: string
@@ -124,6 +149,73 @@ export async function startAgentSession(params: {
     sessionId: session.id,
     traceUrl: `https://platform.claude.com/workspaces/default/sessions/${session.id}`,
   }
+}
+
+/// Asks the agent to generate its own P-256 authorization keypair and report the public half.
+/// The private half stays in its sandbox, so nothing else — including this service — can ever
+/// act as that agent.
+///
+/// The key comes back in a message rather than a tool call or an output file, so the briefing is
+/// written to make that as unambiguous as possible and the reply is validated strictly.
+export async function requestAgentPublicKey(params: {
+  sessionId: string
+  timeoutMs?: number
+}): Promise<string> {
+  const client = anthropic()
+
+  await client.beta.sessions.events.send(params.sessionId, {
+    events: [
+      {
+        type: 'user.message',
+        content: [
+          {
+            type: 'text',
+            text: [
+              'Before you start work, create the signing credential you will use to authorise',
+              'payments. Follow your roster-payments skill to generate a P-256 keypair.',
+              '',
+              'Keep the private key in your sandbox. Never output it, never write it anywhere it',
+              'could be read back, and never include it in a message.',
+              '',
+              'Reply with the PUBLIC key only, on a line of its own, in exactly this form and with',
+              'no other text on that line:',
+              '',
+              'AGENT_PUBLIC_KEY: <base64 DER public key>',
+            ].join('\n'),
+          },
+        ],
+      },
+    ],
+  })
+
+  const deadline = Date.now() + (params.timeoutMs ?? 120_000)
+  const seen = new Set<string>()
+
+  while (Date.now() < deadline) {
+    const events = await client.beta.sessions.events.list(params.sessionId)
+
+    for (const event of events.data) {
+      if (event.type !== 'agent.message' || seen.has(event.id)) continue
+      seen.add(event.id)
+
+      const text = (event.content ?? [])
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+
+      try {
+        return parseAgentPublicKey(text)
+      } catch {
+        // Not this message — the agent narrates before it answers. Keep waiting.
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+  }
+
+  throw new AgentKeyNotProvided(
+    `the agent did not report a usable public key within ${(params.timeoutMs ?? 120_000) / 1000}s`,
+  )
 }
 
 /// §4.3, after `approvePending` has been confirmed on-chain. The backend sends this itself

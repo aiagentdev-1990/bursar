@@ -1,4 +1,4 @@
-import { PERIOD_LABEL } from '@/lib/mock-data'
+import { periodLabel } from '@/lib/org'
 
 /** The shell's nav has three items and the mockups draw two of them. This exists so Settings
  *  doesn't 404 during a demo; it is not a checkpoint-8 deliverable. */
@@ -7,7 +7,7 @@ export default function Settings() {
     <>
       <div className="pagehead">
         <div>
-          <span className="eyebrow">Settings · {PERIOD_LABEL}</span>
+          <span className="eyebrow">Settings · {periodLabel()}</span>
           <div className="hero-line">
             <span className="hero">Nothing to configure yet</span>
           </div>

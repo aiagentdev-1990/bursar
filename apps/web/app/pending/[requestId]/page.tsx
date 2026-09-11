@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, CornerArrow } from '@/components/Icons'
+import { PendingDecision } from '@/components/PendingDecision'
+import { Unavailable } from '@/components/Unavailable'
 import { usd, usdWhole } from '@/lib/money'
-import { findAgent, findPending, pendingRequests, PERIOD_LABEL } from '@/lib/mock-data'
+import { attempt, loadPending } from '@/lib/load'
+import { periodLabel } from '@/lib/org'
 
-export function generateStaticParams() {
-  return pendingRequests.map((r) => ({ requestId: r.requestId }))
-}
+export const dynamic = 'force-dynamic'
 
 function Cell({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
@@ -20,15 +21,26 @@ function Cell({ label, value, sub }: { label: string; value: string; sub: string
 
 export default async function PendingApproval({ params }: { params: Promise<{ requestId: string }> }) {
   const { requestId } = await params
-  const request = findPending(requestId)
+  const result = await attempt(() => loadPending(requestId))
+
+  if (!result.ok) {
+    return (
+      <>
+        <Link className="backlink" href="/">
+          <ArrowLeft /> Roster
+        </Link>
+        <Unavailable message={result.message} />
+      </>
+    )
+  }
+
+  // Settled or never existed. Either way there is nothing left to decide.
+  const request = result.value
   if (!request) notFound()
 
-  const agent = findAgent(request.agentId)
-  if (!agent) notFound()
-
-  const over = request.amount - agent.perTxCap
-  const capAfter = agent.periodSpend + request.amount
-  const month = PERIOD_LABEL.split(' ')[0]
+  const overTx = request.amount > request.perTxCap
+  const capAfter = request.periodSpend + request.amount
+  const month = periodLabel().split(' ')[0]
 
   return (
     <>
@@ -48,10 +60,14 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
       <p className="prose">{request.purpose}</p>
 
       <div className="detail-strip">
-        <Cell label="Requested by" value={agent.name} sub={agent.role} />
-        <Cell label="Category" value={request.category} sub={request.requestedAt} />
-        <Cell label="Per-transaction limit" value={usd(agent.perTxCap)} sub={`${usd(over)} over`} />
-        <Cell label="Monthly cap after" value={usdWhole(capAfter)} sub={`of ${usdWhole(agent.perPeriodCap)}`} />
+        <Cell label="Requested by" value={request.agentName} sub={request.agentRole} />
+        <Cell label="Category" value={request.category} sub={request.requestedAt || `Request #${request.requestId}`} />
+        <Cell
+          label="Per-transaction limit"
+          value={usd(request.perTxCap)}
+          sub={overTx ? `${usd(request.amount - request.perTxCap)} over` : 'Within limit'}
+        />
+        <Cell label="Monthly cap after" value={usdWhole(capAfter)} sub={`of ${usdWhole(request.perPeriodCap)}`} />
       </div>
 
       {/* The most important line on the screen: it tells the owner the approval *is* the
@@ -65,18 +81,12 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
       <div className="callout">
         <span className="callout-mark"><CornerArrow /></span>
         <span>
-          Approving releases <strong>{usd(request.amount)}</strong> to {agent.name} to pay {request.payee} — there
-          is no second confirmation, and it counts against {agent.name}&rsquo;s {month} cap.
+          Approving releases <strong>{usd(request.amount)}</strong> to {request.agentName} to pay {request.payee} — there
+          is no second confirmation, and it counts against {request.agentName}&rsquo;s {month} cap.
         </span>
       </div>
 
-      {/* Inert at checkpoint 8. Checkpoint 6 wires these to POST /pending/:requestId/approve and
-          /reject; approve then sends the Claude session-resume event (§4.3), never inferred from
-          the SpendExecuted stream. */}
-      <div className="actions">
-        <button type="button" className="btn btn-quiet">Reject</button>
-        <button type="button" className="btn btn-primary">Approve payment</button>
-      </div>
+      <PendingDecision requestId={request.requestId} />
     </>
   )
 }

@@ -1,5 +1,18 @@
-import 'dotenv/config'
+import { config } from 'dotenv'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
+
+/// The one `.env` lives at the repo root (README, "Getting started"), but pnpm runs this package
+/// with apps/api as its cwd, so dotenv's default lookup never finds it. Load the root file
+/// explicitly. Neither call overrides a variable already set, so a real environment still wins.
+///
+/// Skipped under NODE_ENV=test: the integration harness sets its own environment and deletes
+/// ANTHROPIC_API_KEY on purpose, and the root file would quietly put real credentials back.
+if (process.env.NODE_ENV !== 'test') {
+  config()
+  config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env') })
+}
 
 /// Fail at boot with a readable list, not at the first request with a cryptic undefined.
 
@@ -8,10 +21,12 @@ const address = z
   .regex(/^0x[0-9a-fA-F]{40}$/, 'must be a 0x-prefixed 20-byte address')
   .transform((v) => v as `0x${string}`)
 
+/// Accepts a key with or without the 0x prefix — wallets export both, and forge and viem each
+/// insist on their own. Normalised here so nothing downstream has to care.
 const hex32 = z
   .string()
-  .regex(/^0x[0-9a-fA-F]{64}$/, 'must be a 0x-prefixed 32-byte private key')
-  .transform((v) => v as `0x${string}`)
+  .regex(/^(0x)?[0-9a-fA-F]{64}$/, 'must be a 32-byte hex private key')
+  .transform((v) => (v.startsWith('0x') ? v : `0x${v}`) as `0x${string}`)
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8787),
@@ -32,7 +47,9 @@ const schema = z.object({
   OWNER_PRIVATE_KEY: hex32,
 
   // ── reads (§4.5) ──
-  BLOCKSCOUT_API_URL: z.string().url(),
+  /// ArcScan is a Blockscout deployment and serves /api/v2/addresses/{addr}/logs, block
+  /// timestamps included — confirmed against the live instance 2026-09-11.
+  BLOCKSCOUT_API_URL: z.string().url().default('https://testnet.arcscan.app'),
   BLOCKSCOUT_API_KEY: z.string().optional(),
 
   // ── auth ──
@@ -70,7 +87,10 @@ let cached: Env | undefined
 export function loadEnv(): Env {
   if (cached) return cached
 
-  const parsed = schema.safeParse(process.env)
+  // `.env.example` says "leave the rest blank", and a blank `KEY=` arrives as "" — which would
+  // fail `.url()` and skip every `.default()`. Blank means unset.
+  const set = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== ''))
+  const parsed = schema.safeParse(set)
   if (!parsed.success) {
     const lines = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`)
     throw new Error(`Invalid environment — see .env.example\n${lines.join('\n')}`)

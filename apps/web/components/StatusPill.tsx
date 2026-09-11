@@ -1,4 +1,4 @@
-import type { AgentStatus, PaymentStatus } from '@/lib/mock-data'
+import type { AgentStatus, PaymentStatus } from '@/lib/roster'
 
 const AGENT_LABEL: Record<AgentStatus, string> = {
   active: 'Active',

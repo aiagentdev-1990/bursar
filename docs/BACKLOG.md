@@ -11,8 +11,8 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
 
 ## Day 1 — the guarantee
 
-- [x] **1. Allowance Contract on Arc testnet** — written and tested 2026-09-09; **deployment still
-      pending** an RPC URL and a funded key. `Roster.sol` + `RosterFactory.sol`, 35 tests passing,
+- [x] **1. Allowance Contract on Arc testnet** — written and tested 2026-09-09; **deployed and
+      verified on ArcScan 2026-09-11** (addresses in DECISIONS.md). `Roster.sol` + `RosterFactory.sol`,
       all four testing-bar cases covered. `sweepUnspent` dropped and the period fixed at 30 days;
       see DECISIONS.md 2026-09-09.
   > Read docs/TECH-DESIGN.md §4.2–4.4 and §5. Implement `packages/contracts/src/Roster.sol`
@@ -73,7 +73,11 @@ Circle's walkthrough describes, and that hasn't been tested by hand.
   > agent names, monthly-vs-period wording, demo cap figures, category-vs-role). Settle those five
   > before writing components. Static data first — the layout is the deliverable at this checkpoint.
 
-- [ ] **9. Wire overview + activity feed to Blockscout**
+- [x] **9. Wire overview + activity feed to Blockscout** — landed 2026-09-11. `apps/web` reads
+      through `apps/api` on the Next server: caps and spend from the contract's `getAgent`, history
+      from ArcScan's Blockscout API (confirmed to serve the v2 logs shape). Fixtures deleted. Pending
+      approve/reject wired as server actions; the hire form is still inert. Demo data comes from
+      `pnpm --filter @roster/api seed`. See DECISIONS.md 2026-09-11.
   > Replace the mocks. `GET /api/v2/addresses/{contract}/logs`, grouped by agent, budget bars
   > computed client-side, pending items flagged.
 

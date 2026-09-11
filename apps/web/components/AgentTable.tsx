@@ -1,4 +1,4 @@
-import { agents, agentCategory, type Agent } from '@/lib/mock-data'
+import type { Agent } from '@/lib/roster'
 import { usd, usdWhole, pctOfCap } from '@/lib/money'
 import { AgentStatusPill } from './StatusPill'
 import { Sparkline } from './Sparkline'
@@ -13,7 +13,7 @@ function AgentRow({ agent }: { agent: Agent }) {
         <div className="agent-role">{agent.role}</div>
       </div>
 
-      <div className="cell-dim col-category">{agentCategory(agent)}</div>
+      <div className="cell-dim col-category">{agent.category}</div>
 
       <div className="col-trend">
         <Sparkline series={agent.trend} />
@@ -44,7 +44,7 @@ function AgentRow({ agent }: { agent: Agent }) {
   )
 }
 
-export function AgentTable() {
+export function AgentTable({ agents }: { agents: Agent[] }) {
   return (
     <div className="table">
       <div className="trow thead">
@@ -57,6 +57,7 @@ export function AgentTable() {
         <span className="col-overflow" />
       </div>
       <div className="tbody">
+        {agents.length === 0 && <p className="empty">No agents on this roster yet. Hire one to get started.</p>}
         {agents.map((agent) => (
           <AgentRow key={agent.id} agent={agent} />
         ))}

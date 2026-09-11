@@ -46,6 +46,12 @@ const schema = z.object({
   /// signs on an *agent's* behalf — agents hold their own keys via Privy (§6).
   OWNER_PRIVATE_KEY: hex32,
 
+  /// Pays the gas for agents' signed spends — `executeSpendFor`, submitted by POST /relay/spend.
+  /// Deliberately not the owner key: the relay route is public, and nothing reachable from it
+  /// should be able to hire, approve or revoke. Holds a little USDC for gas and nothing else.
+  /// Optional: without it the relay answers 501 and agents can only use `executeSpend` directly.
+  RELAYER_PRIVATE_KEY: hex32.optional(),
+
   // ── reads (§4.5) ──
   /// ArcScan is a Blockscout deployment and serves /api/v2/addresses/{addr}/logs, block
   /// timestamps included — confirmed against the live instance 2026-09-11.

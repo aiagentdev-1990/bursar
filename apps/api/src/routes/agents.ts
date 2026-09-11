@@ -1,22 +1,15 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { formatUnits, stringToHex, type Address } from 'viem'
+import { stringToHex, type Address } from 'viem'
 import * as contract from '../chain/roster.js'
 import { fetchRosterEvents, agentAddressesFrom, openRequestsFrom } from '../services/blockscout.js'
 import { encodeLabel, decodeLabel, InvalidLabelError } from '../services/labels.js'
 import { findByAgentId, agentId } from '../services/ids.js'
-import { toAgentView, toActivityView } from '../services/view.js'
+import { toAgentView, toActivityView, toHireView } from '../services/view.js'
 import { walletProvider } from '../services/wallets.js'
-import {
-  startAgentSession,
-  sendMessage,
-  waitForWalletAddress,
-  AgentRuntimeUnavailable,
-  AgentSetupFailed,
-  type StartedSession,
-} from '../services/agentRuntime.js'
-import { contractEnabled, ROSTER_ADDRESS } from '../chain/chain.js'
-import { loadEnv } from '../env.js'
+import { runtimeAvailable } from '../services/agentRuntime.js'
+import { hireJobs } from '../services/hiring.js'
+import { contractEnabled } from '../chain/chain.js'
 import { store } from '../services/store.js'
 import { ApiError } from '../http/errors.js'
 
@@ -42,8 +35,6 @@ const hireBody = z.object({
   /// The agent's first task, sent once it is on the roster.
   briefing: z.string().min(1).max(4000).optional(),
 })
-
-type HireBody = z.infer<typeof hireBody>
 
 const capsBody = z.object({ perTxCap: baseUnits, perPeriodCap: baseUnits })
 const fundBody = z.object({ amount: baseUnits })
@@ -128,74 +119,10 @@ agents.get('/', async (c) => {
 
 // ─── POST /agents — the §4.1 hire flow ──────────────────────────────────────
 //
-//   1. A new Claude agent with the payment skill, then a session on it.
-//   2. The skill's setup creates the agent's wallet in its own sandbox; the agent reports only the
-//      address. The key never leaves the sandbox and this service never sees it.
-//   3. That address is hired on-chain with its caps, and funded.
-//   4. The agent is told where its allowance lives — the Roster and the relay — and its task.
-//
-// Takes a minute or two, because step 2 waits on the agent. If the agent never reports a wallet,
-// nothing is registered on-chain.
-
-const usd = (v: bigint): string => `$${formatUnits(v, 6)}`
-
-function setupBriefing(body: HireBody): string {
-  return [
-    `You have been hired as ${body.name}. Your role: ${body.role}.`,
-    '',
-    'Before anything else, run the setup in your payment skill and report your wallet address on a',
-    'line of its own, exactly as the skill shows:',
-    '',
-    'WALLET_ADDRESS: 0x...',
-    '',
-    'Buy nothing yet. You are not on the roster until you are told so.',
-  ].join('\n')
-}
-
-function onRosterBriefing(body: HireBody, relayUrl: string | undefined): string {
-  return [
-    'You are on the roster. Save these as your skill says:',
-    '',
-    `Roster contract: ${ROSTER_ADDRESS}`,
-    relayUrl
-      ? `Relay URL: ${relayUrl}`
-      : 'Relay URL: not configured yet. Do not try to buy anything until you are given one.',
-    '',
-    `Your caps: ${usd(body.perTxCap)} per transaction, ${usd(body.perPeriodCap)} per 30 days. Anything`,
-    'above either is held for your owner to decide.',
-    '',
-    body.briefing ?? 'Introduce yourself in one line, then say what you plan to do first.',
-  ].join('\n')
-}
-
-/// Steps 1–2, shared by both modes. Without a Claude runtime (development, the integration
-/// tests), falls back to a local dev wallet so the on-chain half can still be exercised — nothing
-/// runs as that agent, and the response says so.
-async function provision(body: HireBody): Promise<{ wallet: Address; started?: StartedSession; warning?: string }> {
-  let started: StartedSession
-  try {
-    started = await startAgentSession({ name: body.name, role: body.role, briefing: setupBriefing(body) })
-  } catch (error) {
-    if (!(error instanceof AgentRuntimeUnavailable)) throw error
-    return {
-      wallet: await walletProvider().createAgentWallet(body.name),
-      warning: `No Claude session started (${error.message}), so a local dev wallet was used and nothing is running as this agent.`,
-    }
-  }
-
-  try {
-    return { wallet: await waitForWalletAddress(started.sessionId), started }
-  } catch (error) {
-    if (error instanceof AgentSetupFailed) {
-      throw new ApiError(
-        502,
-        'agent_setup_failed',
-        `The agent did not finish setting up: ${error.message}. Nothing was registered on-chain. Session: ${started.traceUrl}`,
-      )
-    }
-    throw error
-  }
-}
+// With a Claude runtime, a hire waits minutes on the agent setting itself up, so it runs as a
+// background job (services/hires.ts) and this answers 202 at once with the hire. Its progress is
+// at GET /agents/hires; the agent joins GET /agents once it is registered on-chain. If the agent
+// never reports a wallet, the hire fails with nothing registered.
 
 agents.post('/', async (c) => {
   const body = await parse(c, hireBody)
@@ -208,8 +135,24 @@ agents.post('/', async (c) => {
     throw error
   }
 
-  const { wallet, started, warning } = await provision(body)
-  const warnings = warning ? [warning] : []
+  if (runtimeAvailable()) {
+    const { hire } = hireJobs.start({
+      name: body.name,
+      role: body.role,
+      perTxCap: body.perTxCap,
+      perPeriodCap: body.perPeriodCap,
+      fundAmount: body.fundAmount,
+      briefing: body.briefing,
+    })
+    return c.json({ hire: toHireView(hire) }, 202)
+  }
+
+  // No Claude runtime (development, the integration tests): there is nothing to wait on, so a
+  // local dev wallet is hired synchronously and the on-chain half can still be exercised. Nothing
+  // runs as this agent, and the response says so.
+  const wallet = await walletProvider().createAgentWallet(body.name)
+  const warning =
+    'No Claude session started (ANTHROPIC_API_KEY is not set), so a local dev wallet was used and nothing is running as this agent.'
 
   const remember = () =>
     store.putAgent({
@@ -218,11 +161,8 @@ agents.post('/', async (c) => {
       role: body.role,
       perTxCap: body.perTxCap.toString(),
       perPeriodCap: body.perPeriodCap.toString(),
-      claudeAgentId: started?.claudeAgentId,
-      sessionId: started?.sessionId,
       createdAt: new Date().toISOString(),
     })
-  if (started) store.setSession(wallet, started.sessionId)
 
   // Provisioning-only mode: no ROSTER_CONTRACT_ADDRESS, so nothing is registered on-chain and
   // NO CAP IS ENFORCED ANYWHERE. Scaffolding, not a supported mode — the response says so.
@@ -238,42 +178,42 @@ agents.post('/', async (c) => {
           perPeriodCap: body.perPeriodCap.toString(),
           status: 'active' as const,
         },
-        started: started !== undefined,
-        ...(started ? { session: started } : {}),
-        warning: [
-          'Provisioning-only mode: no ROSTER_CONTRACT_ADDRESS is set, so these caps are recorded but',
-          'not enforced. Nothing stops this agent spending.',
-          ...warnings,
-        ].join(' '),
+        started: false,
+        warning: `Provisioning-only mode: no ROSTER_CONTRACT_ADDRESS is set, so these caps are recorded but not enforced. Nothing stops this agent spending. ${warning}`,
       },
       201,
     )
   }
 
-  // 3. Registration. From here the caps are live and enforced.
   await contract.hireAgent(wallet, body.perTxCap, body.perPeriodCap, role)
   if (body.fundAmount) await contract.fundAgent(wallet, body.fundAmount)
   remember()
 
-  // 4. Only now does the agent learn where its allowance lives — it cannot spend before it is
-  //    registered, and it is told not to try.
-  if (started) {
-    const relayUrl = loadEnv().RELAY_PUBLIC_URL
-    if (!relayUrl) warnings.push('RELAY_PUBLIC_URL is not set, so the agent has no relay and cannot spend yet.')
-    await sendMessage(started.sessionId, onRosterBriefing(body, relayUrl))
-  }
-
   const info = await contract.getAgent(wallet)
+  return c.json({ agent: toAgentView(wallet, info, { hasOpenRequest: false }), started: false, warning }, 201)
+})
 
-  return c.json(
-    {
-      agent: toAgentView(wallet, info, { hasOpenRequest: false }),
-      started: started !== undefined,
-      ...(started ? { session: started } : {}),
-      ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
-    },
-    201,
-  )
+// ─── hires in flight ────────────────────────────────────────────────────────
+// Registered before /:id, which would otherwise read "hires" as an agent id.
+
+agents.get('/hires', (c) => c.json({ hires: store.listHires().map(toHireView) }))
+
+agents.get('/hires/:hireId', (c) => {
+  const hire = store.getHire(c.req.param('hireId'))
+  if (!hire) throw new ApiError(404, 'unknown_hire', 'There is no hire with that id.')
+  return c.json({ hire: toHireView(hire) })
+})
+
+/// Clears a finished hire — a failure the owner has read, or one that went through. A hire still
+/// running can't be cleared: its job would keep writing to it.
+agents.delete('/hires/:hireId', (c) => {
+  const hire = store.getHire(c.req.param('hireId'))
+  if (!hire) throw new ApiError(404, 'unknown_hire', 'There is no hire with that id.')
+  if (hire.status !== 'failed' && hire.status !== 'active') {
+    throw new ApiError(409, 'hire_in_progress', 'That hire is still in progress.')
+  }
+  store.deleteHire(hire.id)
+  return c.json({ deleted: true })
 })
 
 // ─── GET /agents/:id ────────────────────────────────────────────────────────

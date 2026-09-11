@@ -30,6 +30,9 @@ function anthropic(): Anthropic {
 
 export class AgentRuntimeUnavailable extends Error {}
 
+/// Whether hires can start a Claude agent — the same check `anthropic()` makes before every call.
+export const runtimeAvailable = (): boolean => Boolean(loadEnv().ANTHROPIC_API_KEY)
+
 function systemPromptFor(name: string, role: string): string {
   return [
     `You are ${name}, a hired agent on a business owner's roster. Your role: ${role}.`,

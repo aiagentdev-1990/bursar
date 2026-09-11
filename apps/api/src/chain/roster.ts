@@ -100,18 +100,30 @@ const erc20BalanceOfAbi = [
 
 type WriteArgs = Parameters<typeof publicClient.simulateContract>[0]
 
+/// Every owner write is signed by one account, and concurrent sends from one account race for the
+/// same nonce ("replacement transaction underpriced") — two background hires finishing together,
+/// or a hire landing during an approval, would collide. Sends go through this queue one at a time;
+/// receipts are awaited outside it.
+let ownerQueue: Promise<unknown> = Promise.resolve()
+
 /// Simulate → send → wait. Callers get a mined transaction or a decodable revert, never a hash
 /// whose outcome is still unknown: the approval flow in §4.3 has to confirm `approvePending`
 /// succeeded *before* it tells the agent's session to retry.
 async function send(functionName: string, args: readonly unknown[]): Promise<Hash> {
-  const { request } = await publicClient.simulateContract({
-    ...base,
-    functionName,
-    args,
-    account: ownerAccount,
-  } as unknown as WriteArgs)
+  const submit = async (): Promise<Hash> => {
+    const { request } = await publicClient.simulateContract({
+      ...base,
+      functionName,
+      args,
+      account: ownerAccount,
+    } as unknown as WriteArgs)
+    return ownerClient.writeContract(request as never)
+  }
 
-  const hash = await ownerClient.writeContract(request as never)
+  const sent = ownerQueue.then(submit, submit)
+  ownerQueue = sent.catch(() => undefined)
+  const hash = await sent
+
   await publicClient.waitForTransactionReceipt({ hash })
   return hash
 }

@@ -52,6 +52,11 @@ const schema = z.object({
   /// Optional: without it the relay answers 501 and agents can only use `executeSpend` directly.
   RELAYER_PRIVATE_KEY: hex32.optional(),
 
+  /// Where an agent's sandbox reaches this service's relay (POST /relay/spend) — a public URL,
+  /// since a Managed Agents sandbox cannot see localhost. Sent to each agent when it is hired.
+  /// Optional: without it a hire still registers, but the agent is told it cannot spend yet.
+  RELAY_PUBLIC_URL: z.string().url().optional(),
+
   // ── reads (§4.5) ──
   /// ArcScan is a Blockscout deployment and serves /api/v2/addresses/{addr}/logs, block
   /// timestamps included — confirmed against the live instance 2026-09-11.
@@ -72,13 +77,14 @@ const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   CLAUDE_ENVIRONMENT_ID: z.string().optional(),
 
-  /// The roster-payments skill, attached to every role's Agent config.
+  /// The payment skill attached to every hired agent: x402-arc (skills/x402-arc), whose setup
+  /// creates the agent's wallet in its own sandbox. Upload with `pnpm skills:upload`.
   /// Note the two id shapes: `skill_…` identifies the skill, `skver_…` a specific version of it.
   /// Passing a version id as the skill id is rejected with "skill_id not found".
-  CLAUDE_PAYMENT_SKILL_ID: z.string().default('skill_01KbK1RJhZ1gGXL5NeijmU6L'),
-  /// Pinned so a re-upload cannot change agent behaviour underneath a running demo.
-  /// Set to "latest" to track edits instead.
-  CLAUDE_PAYMENT_SKILL_VERSION: z.string().default('skver_01TrRWRjpkUr8JgoGkFc59nS'),
+  CLAUDE_PAYMENT_SKILL_ID: z.string().default('skill_013WeX2fhy136aaFkUFH4BuW'),
+  /// Pinned so a re-upload cannot change agent behaviour underneath a running demo — this is the
+  /// relayed-spend version uploaded 2026-09-11. Set to "latest" to track edits instead.
+  CLAUDE_PAYMENT_SKILL_VERSION: z.string().default('skver_01FdfPSYGGAjZZjPuAcSKfT6'),
 
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 

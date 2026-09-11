@@ -69,6 +69,10 @@ Two batches. Nothing here is secret.
 | `rpcUrl` | Arc testnet JSON-RPC endpoint |
 | `relayUrl` | Your owner's relay, which submits your signed spend requests and pays their gas |
 
+If a field is missing, use your owner's defaults: `rosterContract`
+`0x17a021A777A231509e6ddb13772CD32AB10ad258`, `relayUrl` `https://api-production-faaef.up.railway.app`.
+Values you are given always win over these.
+
 **After you report your public key** — your wallet does not exist until then, so neither do these:
 
 | Field | What it is |

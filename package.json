@@ -10,6 +10,7 @@
     "web:dev": "pnpm --filter @roster/web dev",
     "web:build": "pnpm --filter @roster/web build",
     "typecheck": "pnpm --filter @roster/api typecheck && pnpm --filter @roster/web typecheck",
-    "test": "pnpm contracts:test && pnpm api:test"
+    "test": "pnpm contracts:test && pnpm api:test",
+    "seller:dev": "pnpm --filter @roster/seller dev"
   }
 }

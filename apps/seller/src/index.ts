@@ -17,6 +17,12 @@ import { toFacilitatorEvmSigner } from '@x402/evm'
 import { registerExactEvmScheme } from '@x402/evm/exact/facilitator'
 import { ExactEvmScheme as ExactEvmServerScheme } from '@x402/evm/exact/server'
 
+/// Railway (like most hosts) assigns the port through `PORT` and health-checks that port, so it
+/// has to win. It is captured *before* the repo's .env is loaded: that file's `PORT` belongs to
+/// apps/api, and adopting it locally would put the seller on the API's port. Locally, then, the
+/// seller falls back to SELLER_PORT or 4021.
+const platformPort = process.env.PORT
+
 config({ path: resolve(import.meta.dirname, '../../../.env') })
 
 const ARC = 'eip155:5042002' as const
@@ -24,7 +30,7 @@ const USDC = '0x3600000000000000000000000000000000000000'
 /// Arc USDC's EIP-712 domain, verified on-chain: name() = "USDC", version() = "2". The client signs
 /// with whatever `extra` says, so getting this wrong makes every payment fail signature checks.
 const USDC_DOMAIN = { name: 'USDC', version: '2' }
-const PORT = Number(process.env.SELLER_PORT ?? 4021)
+const PORT = Number(platformPort ?? process.env.SELLER_PORT ?? 4021)
 
 const rawKey = (process.env.SELLER_PRIVATE_KEY ?? process.env.OWNER_PRIVATE_KEY)?.trim()
 if (!rawKey) {

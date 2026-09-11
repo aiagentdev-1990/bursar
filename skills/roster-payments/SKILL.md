@@ -38,8 +38,9 @@ exactly this form and with nothing else on that line:
 AGENT_PUBLIC_KEY: MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
 ```
 
-Then stop and wait. Your owner's backend registers that key, creates your wallet, funds it for
-gas, and puts you on the roster. It will reply with your wallet address and contract details.
+Then stop and wait. Your owner's backend registers that key, creates your wallet, and puts you on
+the roster. It will reply with your wallet address and contract details. Your wallet gets no gas,
+and needs none — see "Paying for a 402 resource".
 Save those to `~/.roster/config.json` so later sessions have them.
 
 **Never output the contents of `agent-key.pem`.** Not in a message, not in a log, not into a file
@@ -66,6 +67,7 @@ Two batches. Nothing here is secret.
 | `rosterContract` | The Allowance Contract that will hold your budget |
 | `privyAppId` | Privy application id |
 | `rpcUrl` | Arc testnet JSON-RPC endpoint |
+| `relayUrl` | Your owner's relay, which submits your signed spend requests and pays their gas |
 
 **After you report your public key** — your wallet does not exist until then, so neither do these:
 
@@ -100,25 +102,43 @@ through.
 
 ## Paying for a 402 resource
 
+Your owner's seller publishes a free catalog of paid services at
+`https://seller-production-1309.up.railway.app/catalog` — each entry has a `url`, a `description`
+and a `price`. Read it before buying, and prefer the cheapest service that answers the question.
+If your owner gives you a different catalog URL, use that one instead.
+
 A paid endpoint answers `402` with a `PAYMENT-REQUIRED` header — base64 JSON containing an
 `accepts` array whose entries carry `amount` (USDC base units), `payTo`, `network`, `scheme` and
 an `extra` object describing what to sign.
 
-**Call `executeSpend` first, then settle.** Funds are released to your wallet only at the moment
-you need them, so attempting the payment first will fail.
+**Ask the Roster first, then settle.** Funds are released to your wallet only at the moment you
+need them, so attempting the payment first will fail. You ask by **signing** a request — you
+never send a transaction and never need gas. Your owner's relay submits it and pays.
 
 ```
-1. amount ← accepts[0].amount      // base units, already 6dp
-   payee  ← accepts[0].payTo
-   memo   ← a short, honest description of what you are buying
+1. amount   ← accepts[0].amount      // base units, already 6dp
+   payee    ← accepts[0].payTo
+   memo     ← a short, honest description of what you are buying, as hex bytes
+   nonce    ← eth_call rosterContract.nonces(walletAddress)
+   deadline ← now + 600 (unix seconds)
+   domain   ← eth_call rosterContract.eip712Domain()   // name "Roster", version "1", chainId, verifyingContract
 
-2. eth_sendTransaction → rosterContract
-   executeSpend(uint256 amount, address payee, bytes memo)
-   returns (bool executed, uint256 requestId)
+2. eth_signTypedData_v4, via Privy, over
+   Spend(address agent, uint256 amount, address payee, bytes memo, uint256 nonce, uint256 deadline)
+   with agent = walletAddress
 
-3. executed  → the USDC is in your wallet. Settle the x402 payment and retry the request.
+3. POST <relayUrl>/relay/spend
+   { agent, amount, payee, memo, deadline, signature }     // amount and deadline as decimal strings
+   → { executed, requestId?, transactionHash }
+
+4. executed  → the USDC is in your wallet. Settle the x402 payment and retry the request.
    !executed → the payment is HELD. See below. Do not retry.
+   HTTP error → refused; `error.code` is the Roster's reason (AgentNotActive, InvalidSignature,
+                SignatureExpired, InsufficientEarmarkedBalance). Nothing was spent.
 ```
+
+The relay cannot alter what you signed and cannot send the money anywhere but your own wallet —
+the Roster checks your signature, not the relay.
 
 `memo` is written on-chain and shown to your owner in their activity feed. Write what you would
 want to read on an expense report: `"Comparable sold-listing pull, Omega ref. 145.022"`, not
@@ -136,13 +156,14 @@ send the base64 signature as `privy-authorization-signature` alongside `privy-ap
   "version": 1,
   "method": "POST",
   "url": "https://api.privy.io/v1/wallets/<privyWalletId>/rpc",
-  "body": { "method": "eth_sendTransaction", "caip2": "eip155:5042002", "params": {} },
+  "body": { "method": "eth_signTypedData_v4", "caip2": "eip155:5042002", "params": {} },
   "headers": { "privy-app-id": "<privyAppId>", "privy-request-expiry": 0 }
 }
 ```
 
-Useful methods on `/v1/wallets/{id}/rpc`: `eth_sendTransaction` for `executeSpend`,
-`personal_sign` and `eth_signTypedData_v4` for x402 payment headers.
+Useful methods on `/v1/wallets/{id}/rpc`: `eth_signTypedData_v4` for spend requests and x402
+payment headers, `personal_sign` where a seller asks for it. You should never need
+`eth_sendTransaction`.
 
 > **Unverified — confirm before relying on this.** Whether Privy also requires HTTP Basic auth
 > with the app secret alongside the authorization signature is unsettled. You will never be given

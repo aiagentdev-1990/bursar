@@ -289,6 +289,8 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 | `initialize(address owner)` | Once, by the factory | Sets the owner. Replaces a constructor, which a minimal proxy cannot run. |
 | `fundAgent(address agent, uint256 amount)` | `onlyOwner` | Earmarks USDC the Roster **already holds** for that agent. Moves no tokens. Reverts if the balance can't cover every earmark. §4.6 |
 | `executeSpend(uint256 amount, address payee, bytes calldata memo) returns (bool executed, uint256 requestId)` | `onlyAgent` | Checks both caps. If satisfied, transfers `amount` to the agent's own wallet and returns `executed = true`. If not, opens a pending request. §4.2, §4.3 |
+| `executeSpendFor(address agent, uint256 amount, address payee, bytes calldata memo, uint256 deadline, bytes calldata signature) returns (bool executed, uint256 requestId)` | Anyone, carrying the agent's EIP-712 signature | `executeSpend` relayed: same caps, same pending path, same events, funds still to the agent's wallet. The relayer pays gas, so the agent holds no USDC. Added 2026-09-11. |
+| `nonces(address agent) view returns (uint256)` | Public | The nonce the agent's next `executeSpendFor` signature must carry. |
 | `defundAgent(address agent, uint256 amount)` | `onlyOwner` | Returns an agent's earmark to the unallocated treasury. Counterpart to `fundAgent`. |
 | `withdrawTreasury(address to, uint256 amount)` | `onlyOwner` | Moves unallocated USDC out. Bounded by `balance - totalEarmarked`, so it can never touch an earmark. |
 | `approvePending(uint256 requestId)` | `onlyOwner` | Releases a held request's funds. §4.3 |
@@ -300,6 +302,16 @@ The allowance-check used in §4.2 is exposed as a read-only recipe in Bazantic's
 | `owner() / PERIOD_LENGTH() / totalEarmarked()` | Public | Owner, the fixed 30-day period, and the sum of every agent's earmark. |
 
 **Note on period resets:** no `resetPeriod` function. `executeSpend` computes whether the current timestamp has crossed the agent's period boundary since its last recorded reset, and if so zeroes the period-spend counter before checking the cap. The period is a fixed `PERIOD_LENGTH = 30 days` for every agent on every Roster, not a per-agent field — see DECISIONS.md 2026-09-09. `periodStart` advances by whole periods, so an agent that goes quiet for three months does not get a fresh period beginning the moment it wakes up.
+
+**Note on relayed spends (added 2026-09-11).** Gas on Arc is USDC, so an agent that sends its own
+`executeSpend` needs a USDC float — and that float is money it can pay a seller with directly,
+outside every cap. `executeSpendFor` removes the float: the agent signs
+`Spend(agent, amount, payee, memo, nonce, deadline)` under EIP-712 domain
+`{name: "Roster", version: "1", chainId, verifyingContract: <this Roster>}`, and any relayer
+submits it. Each signature is good once (per-agent nonce), on one Roster (the clone's own address
+is the domain), until its deadline, and never after a revoke (checked before the signature). The
+nonce is a separate per-agent mapping, not an `AgentInfo` field, so `getAgent`'s shape is
+unchanged and revocation still touches one struct. See DECISIONS.md 2026-09-11.
 
 **Note on getting funds back out (added 2026-09-09).** `fundAgent` alone made an earmark a
 one-way door: USDC delivered to the Roster but never earmarked was locked in it forever, and
@@ -332,7 +344,7 @@ Isolation now holds at two levels: between agents on one Roster (a storage-layou
 
 ## 6. Backend endpoints
 
-Owner-authenticated only. Agents never call these; an agent's payment tool talks to the contract and the x402 facilitator directly with its own wallet.
+Owner-authenticated, except `POST /relay/spend`. Agents call only that one, carrying their own signature; everything else is owner-only.
 
 | Endpoint | Purpose |
 |---|---|
@@ -350,6 +362,7 @@ Owner-authenticated only. Agents never call these; an agent's payment tool talks
 | `GET /treasury` | Earmarked, unallocated, and total balance. |
 | `POST /treasury/withdraw` | Calls `withdrawTreasury`, always to the roster's owner. |
 | `POST /agents/{id}/funding-schedule` | Recurring payroll top-up via Bridge Kit. §4.6 |
+| `POST /relay/spend` | **Unauthenticated — the one route agents call.** Submits an agent's signed `executeSpendFor` and pays the gas with `RELAYER_PRIVATE_KEY`. The signature is the auth; the contract verifies it. Added 2026-09-11. |
 
 **Not an endpoint but backend infrastructure:** a persistent listener on the contract's event stream watching for `PaymentPending`.
 

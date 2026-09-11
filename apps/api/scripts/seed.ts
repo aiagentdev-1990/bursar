@@ -1,8 +1,15 @@
 // Funds the deployed Roster and plays a morning of agent activity against it, so the dashboard
 // has real on-chain state to read. Every step is a real transaction on Arc testnet: the owner
-// hires and earmarks through the same wrappers the API uses, and each agent signs its own
-// `executeSpend` with its own key. Nothing is faked off-chain — the caps you see enforced here
-// are enforced by the contract, including the two requests that go pending.
+// hires and earmarks through the same wrappers the API uses, and each agent signs its own spend
+// with its own key, submitted by the relayer (`executeSpendFor`, the same call POST /relay/spend
+// makes). Agents hold no gas — DECISIONS.md 2026-09-11. Nothing is faked off-chain: the caps you
+// see enforced here are enforced by the contract, including the two requests that go pending.
+//
+// Every release is followed by the payment it was for, as in the real x402 flow: the agent signs
+// an EIP-3009 authorization for exactly the released amount and the relayer submits it, as a
+// seller's facilitator would. Released USDC passes straight through — an agent's wallet ends each
+// spend where it started, at zero. (An earlier version released and stopped, stranding every
+// amount; `pnpm --filter @roster/api sweep` recovered those.)
 //
 //   pnpm --filter @roster/api seed             fund the treasury, hire the five demo agents,
 //                                              earmark their budgets, run the scripted morning
@@ -23,26 +30,22 @@
 // WALLET_PROVIDER=local applies, and this refuses to run with NODE_ENV=production.
 
 import {
-  createWalletClient,
   erc20Abi,
   formatUnits,
-  http,
-  keccak256,
-  parseEventLogs,
   parseUnits,
   stringToHex,
-  toBytes,
   zeroAddress,
   type Address,
   type Hex,
 } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { loadEnv } from '../src/env.js'
-import { arcTestnet, contractEnabled, ownerAccount, ownerClient, publicClient, ROSTER_ADDRESS } from '../src/chain/chain.js'
+import { contractEnabled, ownerAccount, ownerClient, publicClient, relayerAccount, ROSTER_ADDRESS } from '../src/chain/chain.js'
 import { rosterAbi } from '../src/chain/abi.js'
 import * as contract from '../src/chain/roster.js'
 import { encodeLabel } from '../src/services/labels.js'
 import { store } from '../src/services/store.js'
+import { transferWithAuthorization } from './lib/eip3009.js'
 
 const env = loadEnv()
 
@@ -74,14 +77,16 @@ const AGENTS: DemoAgent[] = [
 /// `fundAgent` during the demo have headroom.
 const TREASURY_HEADROOM = usdc('0.60')
 
-/// Each agent pays its own gas. On Arc the ERC-20 predeploy and the native gas asset are the
-/// same balance, so a USDC transfer is also a gas top-up.
-const AGENT_GAS = usdc('0.10')
-const AGENT_GAS_FLOOR = 50_000_000_000_000_000n // 0.05 USDC at the native asset's 18 decimals
+/// The relayer pays every agent's gas. On Arc the ERC-20 predeploy and the native gas asset are
+/// the same balance, so a USDC transfer is also a gas top-up. A relayed spend costs well under a
+/// cent, so this covers the morning many times over.
+const RELAYER_GAS = usdc('0.50')
+const RELAYER_GAS_FLOOR = 200_000_000_000_000_000n // 0.20 USDC at the native asset's 18 decimals
 
 // ─── the scripted morning ───────────────────────────────────────────────────
 // Oldest first. `payee` is display copy carried in the memo as "Payee — note", which is how the
-// dashboard renders a payee name without ever holding an address book.
+// dashboard renders a payee name without ever holding an address book. The money itself settles
+// to DEMO_SELLER, below.
 
 interface Spend {
   agent: string
@@ -128,11 +133,21 @@ const ROUND: Record<string, Omit<Spend, 'agent'>> = {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-/// A stand-in payee address, derived from the name. Nobody holds its key and it never receives
-/// anything: the contract releases to the agent's own wallet, never to the payee (DECISIONS.md
-/// 2026-09-09, "The payee is advisory"). In this mock no x402 payment follows, so released USDC
-/// stays in the agent's wallet — the documented released-but-unspent state.
-const payeeAddress = (name: string): Address => `0x${keccak256(toBytes(`roster-demo-payee:${name}`)).slice(-40)}`
+/// Every mock seller is played by one real counterparty: the account apps/seller takes payments
+/// with — SELLER_PRIVATE_KEY, falling back to the owner key, exactly as apps/seller does. The
+/// payments have to land somewhere real; a made-up address would burn them. It is also the payee
+/// the agent names in `executeSpendFor`, so what the contract records matches where money went.
+const sellerKey = process.env.SELLER_PRIVATE_KEY?.trim()
+const DEMO_SELLER: Address = sellerKey
+  ? privateKeyToAccount((sellerKey.startsWith('0x') ? sellerKey : `0x${sellerKey}`) as Hex).address
+  : ownerAccount.address
+
+/// The x402 payment that follows a release: the agent signs an EIP-3009 authorization for exactly
+/// the released amount and the relayer submits it, as a seller's facilitator would. The agent
+/// sends nothing, and its wallet is back at zero afterwards.
+async function payAs(agent: Hired, amount: bigint) {
+  await transferWithAuthorization(agent.key, DEMO_SELLER, amount)
+}
 
 async function waitOk(hash: Hex, what: string) {
   const receipt = await publicClient.waitForTransactionReceipt({ hash })
@@ -190,32 +205,38 @@ async function ensureHired(demo: DemoAgent): Promise<Hired | undefined> {
   return { demo, address, key, fresh: true }
 }
 
-async function ensureGas(agent: Hired) {
-  const balance = await publicClient.getBalance({ address: agent.address })
-  if (balance >= AGENT_GAS_FLOOR) return
-  await transferUsdc(agent.address, AGENT_GAS, `gas for ${agent.demo.name}`)
+async function ensureRelayerGas() {
+  if (!relayerAccount) throw new Error('RELAYER_PRIVATE_KEY is not set — agents hold no gas, so every spend is relayed.')
+  const balance = await publicClient.getBalance({ address: relayerAccount.address })
+  if (balance >= RELAYER_GAS_FLOOR) return
+  await transferUsdc(relayerAccount.address, RELAYER_GAS, 'gas for the relayer')
+  console.log(`relayer   topped up with ${fmt(RELAYER_GAS)} for gas`)
 }
 
-/// The agent's own call, signed with the agent's own key. The outcome is read from the receipt's
-/// events rather than from a simulation, so it is what actually happened on-chain.
+/// The agent signs with its own key; the relayer submits and pays — `contract.relaySpend`, the
+/// same function POST /relay/spend calls. The domain comes from the contract's `eip712Domain()`,
+/// as the skill reads it. The outcome is read from the receipt's events, so it is what actually
+/// happened on-chain.
 async function spendAs(agent: Hired, spend: Omit<Spend, 'agent'>): Promise<{ executed: boolean; requestId?: bigint }> {
-  const account = privateKeyToAccount(agent.key)
-  const client = createWalletClient({ account, chain: arcTestnet, transport: http(env.ARC_TESTNET_RPC_URL) })
+  const amount = usdc(spend.amount)
+  const payee = DEMO_SELLER
   const memo = stringToHex(`${spend.payee} — ${spend.note}`)
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600)
 
-  const { request } = await publicClient.simulateContract({
-    address: ROSTER_ADDRESS,
-    abi: rosterAbi,
-    functionName: 'executeSpend',
-    args: [usdc(spend.amount), payeeAddress(spend.payee), memo],
-    account,
-  } as never)
-  const hash = await client.writeContract(request as never)
-  const receipt = await waitOk(hash, `${agent.demo.name} executeSpend`)
+  const [nonce, [, name, version, chainId, verifyingContract]] = await Promise.all([
+    publicClient.readContract({ address: ROSTER_ADDRESS, abi: rosterAbi, functionName: 'nonces', args: [agent.address] }),
+    publicClient.readContract({ address: ROSTER_ADDRESS, abi: rosterAbi, functionName: 'eip712Domain' }),
+  ])
 
-  const [held] = parseEventLogs({ abi: rosterAbi, eventName: 'PaymentPending', logs: receipt.logs })
-  if (held) return { executed: false, requestId: (held.args as { requestId: bigint }).requestId }
-  return { executed: true }
+  const signature = await privateKeyToAccount(agent.key).signTypedData({
+    domain: { name, version, chainId, verifyingContract },
+    types: contract.SPEND_TYPES,
+    primaryType: 'Spend',
+    message: { agent: agent.address, amount, payee, memo, nonce, deadline },
+  })
+
+  const outcome = await contract.relaySpend({ agent: agent.address, amount, payee, memo, deadline, signature })
+  return { executed: outcome.executed, requestId: outcome.requestId }
 }
 
 async function play(hired: Map<string, Hired>, spends: Spend[]) {
@@ -227,14 +248,16 @@ async function play(hired: Map<string, Hired>, spends: Spend[]) {
     const line = `  ${agent.demo.name.padEnd(10)} ${fmt(usdc(spend.amount)).padStart(6)}  ${spend.payee}`
 
     if (outcome.executed) {
-      console.log(`${line} — executed`)
+      await payAs(agent, usdc(spend.amount))
+      console.log(`${line} — released, paid`)
       continue
     }
 
     const id = outcome.requestId!
     if (spend.owner === 'approve') {
       await contract.approvePending(id)
-      console.log(`${line} — held as #${id}, approved by the owner`)
+      await payAs(agent, usdc(spend.amount))
+      console.log(`${line} — held as #${id}, approved by the owner, paid`)
     } else if (spend.owner === 'reject') {
       await contract.rejectPending(id)
       console.log(`${line} — held as #${id}, rejected by the owner`)
@@ -277,7 +300,7 @@ async function main() {
   if (mode === 'activity') {
     const hired = (await Promise.all(AGENTS.map(findExisting))).filter((h): h is Hired => h !== undefined)
     if (hired.length === 0) throw new Error('No seeded agents on this Roster yet. Run the full seed first.')
-    for (const agent of hired) await ensureGas(agent)
+    await ensureRelayerGas()
 
     const live: Hired[] = []
     for (const agent of hired) {
@@ -320,9 +343,8 @@ async function main() {
         functionName: 'balanceOf',
         args: [ownerAccount.address],
       })
-      const gas = AGENT_GAS * BigInt(fresh.length)
-      if (wallet < deficit + gas) {
-        throw new Error(`The owner holds ${fmt(wallet)} but seeding needs ${fmt(deficit + gas)}. Top up from the Arc faucet.`)
+      if (wallet < deficit + RELAYER_GAS) {
+        throw new Error(`The owner holds ${fmt(wallet)} but seeding needs ${fmt(deficit + RELAYER_GAS)}. Top up from the Arc faucet.`)
       }
       await transferUsdc(ROSTER_ADDRESS, deficit, 'treasury deposit')
       console.log(`\ntreasury  deposited ${fmt(deficit)}`)
@@ -336,8 +358,9 @@ async function main() {
     console.log(`  ${agent.demo.name.padEnd(10)} ${fmt(agent.demo.earmark)}`)
   }
 
-  // 4. Gas, then the morning — only against a roster that has not already had one.
-  for (const agent of hired) await ensureGas(agent)
+  // 4. Gas for the relayer — never for an agent — then the morning, only against a roster that
+  //    has not already had one.
+  await ensureRelayerGas()
 
   // The morning's cap math assumes a clean slate: nobody has spent and no request has ever been
   // held. Anything else means it already ran (or partly ran), and replaying it would double it.

@@ -17,6 +17,9 @@ import { startBlockscoutStub, type BlockscoutStub } from './blockscout.js'
 
 export const OWNER_TOKEN = 'integration-test-owner-token-000000'
 
+/// Anvil's well-known account #1. Submits signed spends for POST /relay/spend.
+export const RELAYER_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d' as const
+
 export interface Harness {
   app: Hono
   deployment: Deployment
@@ -64,7 +67,16 @@ export async function startHarness(): Promise<Harness> {
 
   const storeFile = join(stateDir, 'store.json')
 
+  // The relayer pays gas for signed spends. A different account from the owner, as in production.
+  try {
+    await deployment.fundGas(privateKeyToAccount(RELAYER_KEY).address)
+  } catch (error) {
+    await unwind()
+    throw error
+  }
+
   Object.assign(process.env, {
+    RELAYER_PRIVATE_KEY: RELAYER_KEY,
     // The harness never binds a port; app.ts only reports it on /health.
     PORT: '8787',
     ARC_TESTNET_RPC_URL: anvil.rpcUrl,

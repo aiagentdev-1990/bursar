@@ -12,6 +12,13 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@roster/web", "dev"],
       "port": 3000
+    },
+    {
+      "name": "roster-seller",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@roster/seller", "dev"],
+      "port": 4021,
+      "autoPort": true
     }
   ]
 }

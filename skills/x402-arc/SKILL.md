@@ -19,9 +19,12 @@ releases immediately and you pay. Over either cap it **holds** the request for y
 approve or reject. You cannot override this, and you must not try.
 
 Everything here is **Arc testnet** (`eip155:5042002`). You pay only with Arc USDC,
-`0x3600000000000000000000000000000000000000`, which has **6 decimals**: `10000` is one cent. Your
-wallet also needs a little USDC for gas, because asking the Roster is a transaction you send. Your
-owner provides that.
+`0x3600000000000000000000000000000000000000`, which has **6 decimals**: `10000` is one cent.
+
+**You never need gas.** You ask the Roster by *signing* a request — which is free and sends
+nothing — and your owner's **relay** submits it and pays the gas. Paying the seller is a signed
+authorization too; the seller's facilitator settles it. So your wallet is normally empty: it holds
+USDC only between a release and the payment that follows it.
 
 ## Setup — once per session
 
@@ -96,14 +99,14 @@ if (existsSync(rosterFile)) {
 console.log(JSON.stringify(out, null, 2))
 ```
 
-`~/x402/roster-pay.mjs` — the normal way to buy something. Quotes the price, asks the Roster to
-release it, and pays only if it was released:
+`~/x402/roster-pay.mjs` — the normal way to buy something. Quotes the price, signs a request for
+exactly that amount, has the relay submit it to the Roster, and pays only if it was released:
 
 ```js
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createPublicClient, createWalletClient, http, parseAbi, parseEventLogs, stringToHex, formatUnits } from 'viem'
+import { createPublicClient, http, parseAbi, stringToHex, formatUnits } from 'viem'
 import { arcTestnet } from 'viem/chains'
 import { privateKeyToAccount } from 'viem/accounts'
 import { x402Client, wrapFetchWithPayment } from '@x402/fetch'
@@ -117,6 +120,7 @@ if (!url || !memo) throw new Error('usage: node roster-pay.mjs <url> "<what you 
 const dir = join(homedir(), '.x402')
 const account = privateKeyToAccount(readFileSync(join(dir, 'wallet.key'), 'utf8').trim())
 const roster = readFileSync(join(dir, 'roster'), 'utf8').trim()
+const relay = readFileSync(join(dir, 'relay'), 'utf8').trim().replace(/\/$/, '')
 const headers = { 'ngrok-skip-browser-warning': '1' }
 const done = (o) => { console.log(JSON.stringify(o, null, 2)); process.exit(0) }
 
@@ -129,43 +133,76 @@ const offer = required.accepts.find(
 )
 if (!offer) done({ outcome: 'UNSUPPORTED', reason: 'no exact Arc USDC payment option', accepts: required.accepts })
 
-// 2. Ask the Roster to release exactly that amount, to pay exactly that seller.
-const abi = parseAbi([
-  'function executeSpend(uint256 amount, address payee, bytes memo) returns (bool executed, uint256 requestId)',
-  'event SpendExecuted(address indexed agent, address indexed payee, uint256 amount, bytes memo)',
-  'event PaymentPending(uint256 indexed requestId, address indexed agent, address indexed payee, uint256 amount, bytes memo)',
-  'error NotAgent()',
-  'error AgentNotActive()',
-  'error InsufficientEarmarkedBalance()',
-])
+// 2. Sign a request for exactly that amount, to exactly that seller. Signing sends nothing and
+//    costs nothing. The nonce makes the signature good once; the deadline makes it good for ten
+//    minutes; the domain (read from the Roster itself) makes it good on your Roster only.
 const chain = createPublicClient({ chain: arcTestnet, transport: http() })
-const signer = createWalletClient({ account, chain: arcTestnet, transport: http() })
-let releaseTx
+const abi = parseAbi([
+  'function nonces(address agent) view returns (uint256)',
+  'function eip712Domain() view returns (bytes1 fields, string name, string version, uint256 chainId, address verifyingContract, bytes32 salt, uint256[] extensions)',
+])
+const [nonce, [, name, version, chainId, verifyingContract]] = await Promise.all([
+  chain.readContract({ address: roster, abi, functionName: 'nonces', args: [account.address] }),
+  chain.readContract({ address: roster, abi, functionName: 'eip712Domain' }),
+])
+const spend = {
+  agent: account.address,
+  amount: BigInt(offer.amount),
+  payee: offer.payTo,
+  memo: stringToHex(memo),
+  nonce,
+  deadline: BigInt(Math.floor(Date.now() / 1000) + 600),
+}
+const signature = await account.signTypedData({
+  domain: { name, version, chainId, verifyingContract },
+  types: {
+    Spend: [
+      { name: 'agent', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'payee', type: 'address' },
+      { name: 'memo', type: 'bytes' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+  },
+  primaryType: 'Spend',
+  message: spend,
+})
+
+// 3. The relay submits it and pays the gas. The Roster decides; the relay cannot change what
+//    you signed, and cannot send the money anywhere but your own wallet.
+let relayed
 try {
-  releaseTx = await signer.writeContract({
-    address: roster,
-    abi,
-    functionName: 'executeSpend',
-    args: [BigInt(offer.amount), offer.payTo, stringToHex(memo)],
+  relayed = await fetch(`${relay}/relay/spend`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      agent: spend.agent,
+      amount: spend.amount.toString(),
+      payee: spend.payee,
+      memo: spend.memo,
+      deadline: spend.deadline.toString(),
+      signature,
+    }),
   })
 } catch (e) {
-  done({ outcome: 'REFUSED', reason: e.cause?.data?.errorName ?? e.shortMessage ?? String(e) })
+  done({ outcome: 'RELAY_UNREACHABLE', relay, reason: String(e) })
 }
-const logs = parseEventLogs({ abi, logs: (await chain.waitForTransactionReceipt({ hash: releaseTx })).logs })
-const held = logs.find((l) => l.eventName === 'PaymentPending')
-if (held) {
+const answer = await relayed.json().catch(() => ({}))
+if (!relayed.ok) done({ outcome: 'REFUSED', reason: answer.error?.code ?? `relay returned ${relayed.status}`, detail: answer.error?.message })
+if (!answer.executed) {
   done({
     outcome: 'HELD',
-    requestId: held.args.requestId.toString(),
-    amount: formatUnits(held.args.amount, 6),
+    requestId: answer.requestId,
+    amount: formatUnits(spend.amount, 6),
     payee: offer.payTo,
     url,
-    tx: releaseTx,
+    tx: answer.transactionHash,
   })
 }
-if (!logs.some((l) => l.eventName === 'SpendExecuted')) done({ outcome: 'UNKNOWN', tx: releaseTx })
+const releaseTx = answer.transactionHash
 
-// 3. Released — pay, capped at exactly the quoted amount.
+// 4. Released — pay, capped at exactly the quoted amount.
 const client = new x402Client().register('eip155:*', new ExactEvmScheme(account)).setSpendControls({
   allowedAssets: [{ network: ARC, asset: USDC, maxAmountPerPayment: offer.amount }],
 })
@@ -215,19 +252,25 @@ Then run `node ~/x402/wallet.mjs` and report the address it prints, on a line of
 WALLET_ADDRESS: 0x...
 ```
 
-Wait to be told you are on the roster. You will be given the Roster contract address; save it:
+Wait to be told you are on the roster. You will be given the Roster contract address and your
+owner's relay URL; save both:
 
 ```bash
 echo '<roster address>' > ~/.x402/roster
+echo '<relay url>' > ~/.x402/relay
 ```
+
+You will not be sent any gas, and you do not need any.
 
 ## Discover
 
-A seller publishes a free catalog. Read it before buying:
+Your owner's seller publishes a free catalog. Read it before buying:
 
 ```bash
-curl -s -H 'ngrok-skip-browser-warning: 1' <catalog-url>
+curl -s https://seller-production-1309.up.railway.app/catalog
 ```
+
+If your owner gives you a different catalog URL, use that one instead.
 
 Each service lists its `url`, `method`, `description` and `price`. Choose the service that
 answers the question. If two would do, prefer the cheaper. If nothing fits, say so rather than
@@ -247,8 +290,14 @@ The result's `outcome` is one of:
 - **`PAID`** — released and paid. Report what you bought, the cost, and the settlement
   transaction.
 - **`HELD`** — over a cap; your owner now decides. **This is not an error.** See below.
-- **`REFUSED`** — the Roster rejected the request (`AgentNotActive` means you have been revoked;
-  `InsufficientEarmarkedBalance` means your allowance is not funded). Report it and stop.
+- **`REFUSED`** — the Roster rejected the request. Report the `reason` and stop:
+  - `AgentNotActive` — you have been revoked.
+  - `InsufficientEarmarkedBalance` — your allowance is not funded.
+  - `InvalidSignature` / `SignatureExpired` — the request didn't verify or took too long. Run
+    `roster-pay.mjs` once more; if it fails again, report it. Nothing was spent.
+  - `NotAgent` — the Roster doesn't know your wallet; check `~/.x402/roster`.
+- **`RELAY_UNREACHABLE`** — the relay didn't answer. Nothing was spent. Report it; don't look for
+  another way to pay.
 - **`UNSUPPORTED`** / **`NOT_PAYWALLED`** — the seller doesn't take Arc USDC, or wasn't paywalled.
 
 ## When a payment is held

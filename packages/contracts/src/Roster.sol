@@ -3,6 +3,9 @@ pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {Nonces} from "@openzeppelin/contracts/utils/Nonces.sol";
 import {IRoster} from "./IRoster.sol";
 
 /// @title Roster — the allowance contract
@@ -15,7 +18,13 @@ import {IRoster} from "./IRoster.sol";
 ///         earmarks it per agent with `fundAgent`, and `executeSpend` releases it to the agent's
 ///         own wallet at the point of use — never ahead of time — so the agent holds nothing
 ///         standing. See DECISIONS.md 2026-09-08.
-contract Roster is IRoster {
+///
+///         An agent can ask for a release two ways: `executeSpend`, sent from its own wallet, or
+///         `executeSpendFor`, which it signs and anyone relays. The relayed path exists because
+///         gas on Arc is USDC — a gas float in the agent's wallet is money it can spend without
+///         asking this contract. With a relayer paying gas, the agent holds nothing at all.
+///         Both paths run the same cap check. DECISIONS.md 2026-09-11.
+contract Roster is IRoster, EIP712, Nonces {
     using SafeERC20 for IERC20;
 
     /// @inheritdoc IRoster
@@ -23,6 +32,12 @@ contract Roster is IRoster {
     ///      throughout, and the UI must not imply a boundary the contract isn't enforcing.
     ///      DECISIONS.md 2026-09-09.
     uint256 public constant PERIOD_LENGTH = 30 days;
+
+    /// @notice What an agent signs for `executeSpendFor`. `memo` is hashed, per EIP-712's rule
+    ///         for dynamic `bytes`. The nonce is not a parameter of the call: the contract uses
+    ///         the agent's current one, so a signature is good exactly once.
+    bytes32 public constant SPEND_TYPEHASH =
+        keccak256("Spend(address agent,uint256 amount,address payee,bytes memo,uint256 nonce,uint256 deadline)");
 
     /// @notice Arc's USDC predeploy (0x3600…0000) in production. Immutable lives in the
     ///         implementation's code, which every clone delegatecalls into, so all clones share
@@ -53,16 +68,20 @@ contract Roster is IRoster {
     /// @dev Agent identity is a plain address: msg.sender must be the registered wallet. ERC-8004
     ///      was evaluated and deliberately not integrated — see DECISIONS.md 2026-09-11.
     modifier onlyAgent() {
-        AgentInfo storage agent = _agents[msg.sender];
-        if (!agent.registered) revert NotAgent();
-        if (!agent.active) revert AgentNotActive();
+        _activeAgent(msg.sender);
         _;
     }
 
     /// @dev Constructs the implementation only. Clones never run this, which is why `owner` is
     ///      set here to a non-zero sentinel: an implementation left initializable is an unowned
     ///      contract anyone can claim.
-    constructor(address usdc) {
+    ///
+    ///      The EIP-712 name and version live in the implementation's immutables and are shared
+    ///      by every clone. The domain separator is not: OpenZeppelin's EIP712 rebuilds it
+    ///      whenever `address(this)` is not the address it was cached for, so each clone signs
+    ///      under its own address. That is what stops a spend signed for one team being replayed
+    ///      against another team the same agent happens to be on.
+    constructor(address usdc) EIP712("Roster", "1") {
         if (usdc == address(0)) revert ZeroAddress();
         USDC = IERC20(usdc);
         owner = address(this);
@@ -207,8 +226,64 @@ contract Roster is IRoster {
         onlyAgent
         returns (bool executed, uint256 requestId)
     {
-        AgentInfo storage info = _agents[msg.sender];
+        return _spend(_agents[msg.sender], msg.sender, amount, payee, memo);
+    }
 
+    /// @inheritdoc IRoster
+    /// @dev Permissionless on `msg.sender` by design — the signature is the authorization, and a
+    ///      relayer can only submit what the agent signed. Front-running a relayed spend changes
+    ///      nothing but who paid the gas: the funds still go to the agent's own wallet.
+    ///
+    ///      Revocation is checked before the signature, so an intent signed before `revokeAgent`
+    ///      is dead the moment the revoke lands. The kill switch has no pre-signed hole.
+    function executeSpendFor(
+        address agent,
+        uint256 amount,
+        address payee,
+        bytes calldata memo,
+        uint256 deadline,
+        bytes calldata signature
+    ) external returns (bool, uint256) {
+        AgentInfo storage info = _activeAgent(agent);
+        if (block.timestamp > deadline) revert SignatureExpired();
+
+        _checkSignature(agent, _spendDigest(agent, amount, payee, memo, deadline), signature);
+
+        return _spend(info, agent, amount, payee, memo);
+    }
+
+    // ─── internals ────────────────────────────────────────────────────────────
+
+    /// @dev Consumes the agent's nonce. It increments before the signature is checked, but a bad
+    ///      signature reverts the whole call, increment included, so it costs the agent nothing.
+    function _spendDigest(address agent, uint256 amount, address payee, bytes calldata memo, uint256 deadline)
+        private
+        returns (bytes32)
+    {
+        return _hashTypedDataV4(
+            keccak256(abi.encode(SPEND_TYPEHASH, agent, amount, payee, keccak256(memo), _useNonce(agent), deadline))
+        );
+    }
+
+    /// @dev `tryRecover` rather than `recover`, so every bad signature — malformed, high-s,
+    ///      wrong signer — surfaces as the one custom error the API maps.
+    function _checkSignature(address agent, bytes32 digest, bytes calldata signature) private pure {
+        (address signer, ECDSA.RecoverError error,) = ECDSA.tryRecover(digest, signature);
+        if (error != ECDSA.RecoverError.NoError || signer != agent) revert InvalidSignature();
+    }
+
+    function _activeAgent(address agent) private view returns (AgentInfo storage info) {
+        info = _agents[agent];
+        if (!info.registered) revert NotAgent();
+        if (!info.active) revert AgentNotActive();
+    }
+
+    /// @dev The cap check, shared by both ways of asking. One implementation, so the relayed path
+    ///      cannot enforce anything the direct path does not.
+    function _spend(AgentInfo storage info, address agent, uint256 amount, address payee, bytes calldata memo)
+        private
+        returns (bool executed, uint256 requestId)
+    {
         // Lazy reset: the boundary is computed here, on the agent's own call. There is no
         // maintenance function and nothing to keep alive between periods.
         _rollPeriod(info);
@@ -217,18 +292,15 @@ contract Roster is IRoster {
         // never forced through (R6).
         if (amount > info.perTxCap || info.periodSpend + amount > info.perPeriodCap) {
             requestId = ++nextRequestId;
-            _requests[requestId] =
-                PendingRequest({agent: msg.sender, payee: payee, amount: amount, memo: memo, open: true});
+            _requests[requestId] = PendingRequest({agent: agent, payee: payee, amount: amount, memo: memo, open: true});
 
-            emit PaymentPending(requestId, msg.sender, payee, amount, memo);
+            emit PaymentPending(requestId, agent, payee, amount, memo);
             return (false, requestId);
         }
 
-        _release(info, msg.sender, payee, amount, memo);
+        _release(info, agent, payee, amount, memo);
         return (true, 0);
     }
-
-    // ─── internals ────────────────────────────────────────────────────────────
 
     /// @dev The lazy reset as a pure computation, so there is exactly one implementation of it.
     ///      `_rollPeriod` writes the result; `getAgent` applies it to a memory copy. Two separate
@@ -288,5 +360,12 @@ contract Roster is IRoster {
     /// @inheritdoc IRoster
     function getPendingRequest(uint256 requestId) external view returns (PendingRequest memory) {
         return _requests[requestId];
+    }
+
+    /// @inheritdoc IRoster
+    /// @dev A separate per-agent mapping rather than a field on AgentInfo, so `getAgent`'s return
+    ///      shape — which the skills decode by hand — does not change.
+    function nonces(address agent) public view override(IRoster, Nonces) returns (uint256) {
+        return super.nonces(agent);
     }
 }

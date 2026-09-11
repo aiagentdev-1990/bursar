@@ -2,15 +2,62 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-11 — Agents hold no gas: `executeSpendFor`, a relayed spend
+Gas on Arc is USDC — the same balance agents pay sellers with. An agent sending its own
+`executeSpend` needs a float, and the float breaks three things:
+
+- **It is spendable outside the cap.** The x402-arc skill's `pay.mjs` pays from the wallet
+  directly. The demo's $0.02 float covers four $0.005 purchases the Roster never sees — a hole in
+  "the contract is the only enforcement point", and in 2026-09-08's "agents hold nothing standing".
+- **It never refills.** A release is exactly the payment amount and goes straight to the seller;
+  held requests cost gas and release nothing. Top-ups would have to come from outside the caps.
+- **Revocation doesn't reclaim it.**
+
+Options considered: keep a bounded float (least work, but a hole a judge can name); an ERC-4337
+paymaster via Circle Gas Station (no contract change, but smart accounts per agent, and Arc
+testnet sponsorship is unverified); or a relayed call. Chose the relayed call.
+
+`executeSpendFor(agent, amount, payee, memo, deadline, signature)`: the agent signs EIP-712
+`Spend`, anyone submits, the relayer pays gas. It runs the *same* private `_spend` as
+`executeSpend`, so there is one cap check, not two. Funds still go to the agent's wallet, never
+to the caller, which is also why front-running a relayed spend is harmless. Replay is stopped by
+a per-agent nonce (OpenZeppelin `Nonces`), cross-team replay by the domain (each clone's own
+address — OpenZeppelin `EIP712` rebuilds the separator per clone), stale intents by `deadline`,
+and revocation is checked before the signature so pre-signed intents die with the revoke.
+
+`executeSpend` stays: it costs nothing to keep, and the seed script and existing callers use it.
+Adding a function departs from "nothing not in §5" for the same reason as 2026-09-09's funds-out
+amendment — it touches no cap, period or queue logic of its own. §5 is updated.
+
+**The relay is `POST /relay/spend` in apps/api, unauthenticated.** The one route an agent calls,
+and the one exception to §6's "owner-authenticated only" — the agent's signature is the
+authorization and the contract verifies it; the route checks nothing itself. Every submission is
+simulated first, so a bad signature, expired request or revoked agent is refused with the
+contract's own error and costs no gas. It signs with a separate `RELAYER_PRIVATE_KEY`, never the
+owner key, so nothing reachable from a public route can hire, approve or revoke. Chosen over a
+Managed Agents custom tool because that would need the backend to hold a live event stream per
+session; a URL works from any agent runtime. Consequence: the relay has to be publicly reachable
+from the agent's sandbox — localhost is not.
+
+Known gap: an agent can make the relayer pay gas for unlimited over-cap requests (held requests
+consume no budget). Bounded by the relayer's small balance; rate-limit the route if it matters.
+
 ## 2026-09-11 — Deployed; the dashboard reads live state through apps/api
-**Deployment (Arc testnet, block 61507239, source verified on ArcScan):**
+**Deployment (Arc testnet, block 61518811, source verified on ArcScan)** — redeployed the same day
+to ship `executeSpendFor` (see the entry above):
 
 | | Address |
 |---|---|
-| Roster — the demo owner's team (`ROSTER_CONTRACT_ADDRESS`) | `0x3BcC5Ff272F72c2a770D5E031699CFCe70287d80` |
-| RosterFactory (`ROSTER_FACTORY_ADDRESS`) | `0xFfF59e42eEF09D6859b8Adc2b8D8679BF849b40D` |
-| Roster implementation | `0xFAA5047030cA685093B376F15cAb6Cb736673252` |
+| Roster — the demo owner's team (`ROSTER_CONTRACT_ADDRESS`) | `0x17a021A777A231509e6ddb13772CD32AB10ad258` |
+| RosterFactory (`ROSTER_FACTORY_ADDRESS`) | `0x3e048665cab30e989A8de68E5F410fB3c0De2864` |
+| Roster implementation | `0xaC733D08E1BF74f7589b0c6003cB57f6AaA6Aa1D` |
 | Owner / deployer | `0x1BAB12dd29E89455752613055EC6036eD6c17ccf` |
+| Relayer (`RELAYER_PRIVATE_KEY`) | `0x6BDF83FD0F7f1FfD167891F3914120DEb1935f2c` |
+
+Retired: the first deployment (Roster `0x3BcC5Ff272F72c2a770D5E031699CFCe70287d80`, factory
+`0xFfF59e42eEF09D6859b8Adc2b8D8679BF849b40D`, block 61507239). Drained to the owner with
+`pnpm --filter @roster/api drain` before the redeploy; it holds nothing. Not upgradeable by
+design, so a new function means a new Roster.
 
 **ArcScan is Blockscout.** `/api/v2/addresses/{addr}/logs` answers in the shape `apps/api`
 already decodes, `block_timestamp` included. That was checkpoint 9's first question; it is now

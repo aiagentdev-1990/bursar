@@ -1,7 +1,10 @@
-// Roster backend — owner-authenticated only. Agents never call these endpoints;
-// an agent's payment tool talks to the contract and the x402 facilitator directly
-// with its own wallet. See docs/TECH-DESIGN.md §6.
+// Roster backend — owner-authenticated, with one exception: POST /relay/spend, which agents
+// call and which is authorized by the agent's own EIP-712 signature, not a token. Everything
+// else is owner-only; an agent otherwise talks to the contract and the x402 facilitator
+// directly. See docs/TECH-DESIGN.md §6.
 //
+//   POST   /relay/spend                   UNAUTHENTICATED — submits an agent's signed
+//                                         executeSpendFor and pays its gas (DECISIONS 2026-09-11)
 //   POST   /agents                        hire — wallet + hireAgent + Claude agent/env/session (§4.1)
 //                                         (one Roster per team; RosterFactory.createRoster deploys it)
 //   GET    /agents                        roster overview
@@ -26,6 +29,7 @@ import { requireOwner } from './http/auth.js'
 import { agents, nameLookup } from './routes/agents.js'
 import { pending } from './routes/pending.js'
 import { treasury } from './routes/treasury.js'
+import { relay } from './routes/relay.js'
 import { fetchRosterEvents, agentAddressesFrom } from './services/blockscout.js'
 import { toActivityView } from './services/view.js'
 import * as contract from './chain/roster.js'
@@ -54,6 +58,9 @@ export function createApp() {
   app.route('/agents', agents)
   app.route('/pending', pending)
   app.route('/treasury', treasury)
+
+  // No requireOwner — the signature is the auth. See routes/relay.ts.
+  app.route('/relay', relay)
 
   app.get('/activity', async (c) => {
     const events = await fetchRosterEvents()

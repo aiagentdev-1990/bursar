@@ -1,6 +1,6 @@
-import type { Address, Hash } from 'viem'
+import { parseEventLogs, type Address, type Hash, type Hex } from 'viem'
 import { rosterAbi } from './abi.js'
-import { publicClient, ownerClient, ownerAccount, ROSTER_ADDRESS } from './chain.js'
+import { publicClient, ownerClient, ownerAccount, relayerAccount, relayerClient, ROSTER_ADDRESS } from './chain.js'
 import { loadEnv } from '../env.js'
 
 /// Typed wrappers over the Allowance Contract. Every write simulates first: the simulation is
@@ -133,3 +133,51 @@ export const revokeAgent = (agent: Address) => send('revokeAgent', [agent])
 export const approvePending = (requestId: bigint) => send('approvePending', [requestId])
 
 export const rejectPending = (requestId: bigint) => send('rejectPending', [requestId])
+
+// ─── relayed spends (executeSpendFor) ───────────────────────────────────────
+
+export { SPEND_TYPES } from './spend.js'
+
+export interface SignedSpend {
+  agent: Address
+  amount: bigint
+  payee: Address
+  memo: Hex
+  deadline: bigint
+  signature: Hex
+}
+
+/// One relayer account submits for every agent, and concurrent sends from one account race for
+/// the same nonce ("replacement transaction underpriced"). Sends go through this queue one at a
+/// time; receipts are awaited outside it, so a slow block doesn't stall the next agent.
+let relayQueue: Promise<unknown> = Promise.resolve()
+
+/// Simulate → send → wait, as the relayer. A simulation revert surfaces as the contract's own
+/// error (InvalidSignature, AgentNotActive, …) and costs no gas. Nothing here checks the
+/// signature or a cap — that is the contract's job.
+export async function relaySpend(spend: SignedSpend): Promise<{ executed: boolean; requestId?: bigint; transactionHash: Hash }> {
+  const account = relayerAccount
+  const client = relayerClient
+  if (!account || !client) throw new Error('No relayer is configured (RELAYER_PRIVATE_KEY).')
+
+  const submit = async (): Promise<Hash> => {
+    const { request } = await publicClient.simulateContract({
+      ...base,
+      functionName: 'executeSpendFor',
+      args: [spend.agent, spend.amount, spend.payee, spend.memo, spend.deadline, spend.signature],
+      account,
+    } as unknown as WriteArgs)
+    return client.writeContract(request as never)
+  }
+
+  const sent = relayQueue.then(submit, submit)
+  relayQueue = sent.catch(() => undefined)
+  const transactionHash = await sent
+
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: transactionHash })
+  if (receipt.status !== 'success') throw new Error(`executeSpendFor reverted on-chain (${transactionHash})`)
+
+  const [held] = parseEventLogs({ abi: rosterAbi, eventName: 'PaymentPending', logs: receipt.logs })
+  if (held) return { executed: false, requestId: (held.args as { requestId: bigint }).requestId, transactionHash }
+  return { executed: true, transactionHash }
+}

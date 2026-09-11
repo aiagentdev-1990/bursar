@@ -60,6 +60,11 @@ interface IRoster {
     error ZeroCap();
     /// @notice fundAgent would earmark more USDC than this Roster actually holds.
     error InsufficientTreasury();
+    /// @notice executeSpendFor: the agent's signed deadline has passed.
+    error SignatureExpired();
+    /// @notice executeSpendFor: the signature is malformed, already used, for another Roster, or
+    ///         not the agent's.
+    error InvalidSignature();
 
     // ─── lifecycle ────────────────────────────────────────────────────────────
 
@@ -107,6 +112,23 @@ interface IRoster {
         external
         returns (bool executed, uint256 requestId);
 
+    /// @notice `executeSpend`, signed by the agent and submitted by anyone — so the agent needs no
+    ///         gas, and therefore holds no USDC. Same caps, same pending path, same events; the
+    ///         funds still go to the agent's own wallet, never to the caller.
+    ///
+    ///         The agent signs EIP-712 `Spend(agent, amount, payee, memo, nonce, deadline)` under
+    ///         domain `{name: "Roster", version: "1", chainId, verifyingContract: this Roster}`,
+    ///         with `nonce = nonces(agent)`. Each signature works once, on one Roster, until
+    ///         `deadline`, and never after the agent is revoked.
+    function executeSpendFor(
+        address agent,
+        uint256 amount,
+        address payee,
+        bytes calldata memo,
+        uint256 deadline,
+        bytes calldata signature
+    ) external returns (bool executed, uint256 requestId);
+
     // ─── views ────────────────────────────────────────────────────────────────
 
     function owner() external view returns (address);
@@ -119,4 +141,7 @@ interface IRoster {
     ///      the rolled value, exactly as the next `executeSpend` would set them.
     function getAgent(address agent) external view returns (AgentInfo memory);
     function getPendingRequest(uint256 requestId) external view returns (PendingRequest memory);
+    /// @notice The nonce the agent's next `executeSpendFor` signature must carry. Direct
+    ///         `executeSpend` calls do not consume it.
+    function nonces(address agent) external view returns (uint256);
 }

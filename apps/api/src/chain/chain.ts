@@ -40,6 +40,14 @@ export const ownerClient = createWalletClient({
   transport: http(env.ARC_TESTNET_RPC_URL),
 })
 
+/// Submits agents' signed `executeSpendFor` calls and nothing else. See RELAYER_PRIVATE_KEY in
+/// env.ts for why this is not the owner key. Undefined when no relayer is configured.
+export const relayerAccount = env.RELAYER_PRIVATE_KEY ? privateKeyToAccount(env.RELAYER_PRIVATE_KEY) : undefined
+
+export const relayerClient = relayerAccount
+  ? createWalletClient({ account: relayerAccount, chain: arcTestnet, transport: http(env.ARC_TESTNET_RPC_URL) })
+  : undefined
+
 /// Undefined in provisioning-only mode. `contractEnabled()` is the guard; anything reaching for
 /// this address without checking will fail loudly rather than silently read address zero.
 export const ROSTER_ADDRESS = env.ROSTER_CONTRACT_ADDRESS as `0x${string}`

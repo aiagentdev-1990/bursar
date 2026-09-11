@@ -98,4 +98,9 @@ export const store = {
     state.localKeys[agent.toLowerCase()] = privateKey
     write(state)
   },
+  /// Every wallet this service generated a dev key for (lowercased). Includes wallets that were
+  /// never registered, or were registered on a Roster since retired.
+  localKeyWallets(): string[] {
+    return Object.keys(read().localKeys)
+  },
 }

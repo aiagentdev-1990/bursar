@@ -1,10 +1,10 @@
-import { parseEventLogs, type Address, type Hash, type Hex } from 'viem'
+import { erc20Abi, parseEventLogs, type Address, type Hash, type Hex } from 'viem'
 import { rosterAbi } from './abi.js'
 import { publicClient, ownerClient, ownerAccount, relayerAccount, relayerClient, ROSTER_ADDRESS } from './chain.js'
 import { loadEnv } from '../env.js'
 
 /// Typed wrappers over the Allowance Contract. Every write simulates first: the simulation is
-/// what turns a revert into a decodable custom error (`InsufficientTreasury`, `AgentNotActive`,
+/// what turns a revert into a decodable custom error (`InsufficientBalance`, `AgentNotActive`,
 /// …) instead of an opaque gas-estimation failure, and it means a call that would fail never
 /// costs gas. http/errors.ts maps those names to owner-facing responses.
 ///
@@ -16,7 +16,6 @@ export interface AgentInfo {
   perPeriodCap: bigint
   periodSpend: bigint
   periodStart: bigint
-  earmarkedBalance: bigint
   role: string
   registered: boolean
   active: boolean
@@ -67,34 +66,16 @@ export async function getPeriodLength(): Promise<bigint> {
   return publicClient.readContract({ ...base, functionName: 'PERIOD_LENGTH' })
 }
 
-export async function getTotalEarmarked(): Promise<bigint> {
-  return publicClient.readContract({ ...base, functionName: 'totalEarmarked' })
-}
+const usdcBalanceOf = (account: Address): Promise<bigint> =>
+  publicClient.readContract({ address: loadEnv().USDC_ADDRESS, abi: erc20Abi, functionName: 'balanceOf', args: [account] })
 
-/// USDC the Roster holds that no agent is entitled to — what `withdrawTreasury` is bounded by,
-/// and the headroom `fundAgent` has left.
-export async function getUnallocatedTreasury(): Promise<bigint> {
-  const [balance, earmarked] = await Promise.all([
-    publicClient.readContract({
-      address: loadEnv().USDC_ADDRESS,
-      abi: erc20BalanceOfAbi,
-      functionName: 'balanceOf',
-      args: [ROSTER_ADDRESS],
-    }),
-    getTotalEarmarked(),
-  ])
-  return balance - earmarked
-}
+/// The one balance every agent spends from. No part of it belongs to any agent: a cap is
+/// permission to spend, not a claim on funds, so this is also exactly what `withdrawTreasury`
+/// can take.
+export const getBalance = (): Promise<bigint> => usdcBalanceOf(ROSTER_ADDRESS)
 
-const erc20BalanceOfAbi = [
-  {
-    type: 'function',
-    name: 'balanceOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-] as const
+/// USDC in the owner's own wallet — what "add money" can move into the Roster.
+export const getOwnerWalletBalance = (): Promise<bigint> => usdcBalanceOf(ownerAccount.address)
 
 // ─── writes ─────────────────────────────────────────────────────────────────
 
@@ -106,17 +87,12 @@ type WriteArgs = Parameters<typeof publicClient.simulateContract>[0]
 /// receipts are awaited outside it.
 let ownerQueue: Promise<unknown> = Promise.resolve()
 
-/// Simulate → send → wait. Callers get a mined transaction or a decodable revert, never a hash
-/// whose outcome is still unknown: the approval flow in §4.3 has to confirm `approvePending`
-/// succeeded *before* it tells the agent's session to retry.
-async function send(functionName: string, args: readonly unknown[]): Promise<Hash> {
+/// Simulate → send → wait, as the owner, through the queue. Callers get a mined transaction or a
+/// decodable revert, never a hash whose outcome is still unknown: the approval flow in §4.3 has to
+/// confirm `approvePending` succeeded *before* it tells the agent's session to retry.
+async function sendAsOwner(call: Record<string, unknown>): Promise<Hash> {
   const submit = async (): Promise<Hash> => {
-    const { request } = await publicClient.simulateContract({
-      ...base,
-      functionName,
-      args,
-      account: ownerAccount,
-    } as unknown as WriteArgs)
+    const { request } = await publicClient.simulateContract({ ...call, account: ownerAccount } as unknown as WriteArgs)
     return ownerClient.writeContract(request as never)
   }
 
@@ -124,16 +100,21 @@ async function send(functionName: string, args: readonly unknown[]): Promise<Has
   ownerQueue = sent.catch(() => undefined)
   const hash = await sent
 
-  await publicClient.waitForTransactionReceipt({ hash })
+  const receipt = await publicClient.waitForTransactionReceipt({ hash })
+  if (receipt.status !== 'success') throw new Error(`owner transaction reverted on-chain (${hash})`)
   return hash
 }
 
+const send = (functionName: string, args: readonly unknown[]) => sendAsOwner({ ...base, functionName, args })
+
+/// "Add money": a plain USDC transfer from the owner's wallet to the Roster. The contract has no
+/// deposit function — any transfer to its address is spendable at once (§4.6). Through the owner
+/// queue like every other owner write, since it spends the same nonce.
+export const depositFromOwner = (amount: bigint) =>
+  sendAsOwner({ address: loadEnv().USDC_ADDRESS, abi: erc20Abi, functionName: 'transfer', args: [ROSTER_ADDRESS, amount] })
+
 export const hireAgent = (agent: Address, perTxCap: bigint, perPeriodCap: bigint, role: string) =>
   send('hireAgent', [agent, perTxCap, perPeriodCap, role])
-
-export const fundAgent = (agent: Address, amount: bigint) => send('fundAgent', [agent, amount])
-
-export const defundAgent = (agent: Address, amount: bigint) => send('defundAgent', [agent, amount])
 
 export const withdrawTreasury = (to: Address, amount: bigint) => send('withdrawTreasury', [to, amount])
 

@@ -79,14 +79,23 @@ const out = { address, walletUsdc: usdc(wallet) }
 
 const rosterFile = join(dir, 'roster')
 if (existsSync(rosterFile)) {
-  const a = await client.readContract({
-    address: readFileSync(rosterFile, 'utf8').trim(),
-    abi: parseAbi([
-      'function getAgent(address) view returns ((uint256 perTxCap, uint256 perPeriodCap, uint256 periodSpend, uint256 periodStart, uint256 earmarkedBalance, string role, bool registered, bool active))',
-    ]),
-    functionName: 'getAgent',
-    args: [address],
-  })
+  const roster = readFileSync(rosterFile, 'utf8').trim()
+  const [a, account] = await Promise.all([
+    client.readContract({
+      address: roster,
+      abi: parseAbi([
+        'function getAgent(address) view returns ((uint256 perTxCap, uint256 perPeriodCap, uint256 periodSpend, uint256 periodStart, string role, bool registered, bool active))',
+      ]),
+      functionName: 'getAgent',
+      args: [address],
+    }),
+    client.readContract({
+      address: '0x3600000000000000000000000000000000000000',
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [roster],
+    }),
+  ])
   out.roster = {
     registered: a.registered,
     active: a.active,
@@ -94,7 +103,9 @@ if (existsSync(rosterFile)) {
     periodCap: usdc(a.perPeriodCap),
     spentThisPeriod: usdc(a.periodSpend),
     remainingThisPeriod: usdc(a.perPeriodCap > a.periodSpend ? a.perPeriodCap - a.periodSpend : 0n),
-    earmarked: usdc(a.earmarkedBalance),
+    // Your owner's account, shared by the whole team. You can spend up to the smaller of this
+    // and remainingThisPeriod.
+    ownerBalance: usdc(account),
   }
 }
 console.log(JSON.stringify(out, null, 2))
@@ -256,7 +267,7 @@ Then save your owner's defaults — the Roster contract that holds your allowanc
 that submits your spend requests:
 
 ```bash
-echo '0x17a021A777A231509e6ddb13772CD32AB10ad258' > ~/.x402/roster
+echo '0x823C07bd183405E6FDf3e2e0412315D3B6fDfBBa' > ~/.x402/roster
 echo 'https://api-production-faaef.up.railway.app' > ~/.x402/relay
 ```
 
@@ -296,7 +307,8 @@ The result's `outcome` is one of:
 - **`HELD`** — over a cap; your owner now decides. **This is not an error.** See below.
 - **`REFUSED`** — the Roster rejected the request. Report the `reason` and stop:
   - `AgentNotActive` — you have been revoked.
-  - `InsufficientEarmarkedBalance` — your allowance is not funded.
+  - `InsufficientBalance` — your owner's account is empty (you are within your limits; there is
+    just no money in it). Tell your owner it needs topping up.
   - `InvalidSignature` / `SignatureExpired` — the request didn't verify or took too long. Run
     `roster-pay.mjs` once more; if it fails again, report it. Nothing was spent.
   - `NotAgent` — the Roster doesn't know your wallet; check `~/.x402/roster`.

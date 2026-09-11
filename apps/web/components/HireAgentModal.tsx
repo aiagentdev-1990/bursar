@@ -7,8 +7,9 @@ import { parseUsd, usdWhole } from '@/lib/money'
 import { InfoIcon } from './Icons'
 
 /** No address anywhere — §4.1's "the owner never sees a wallet address" showing up in the form.
- *  Caps are typed as bare dollars and converted to base units on the server; nothing downstream
- *  sees a float.
+ *  Limits are typed as bare dollars and converted to base units on the server; nothing downstream
+ *  sees a float. There is no budget to set: the agent spends from the roster's shared balance,
+ *  so its two limits are its whole setup.
  *
  *  Submitting returns as soon as the API accepts the hire. The agent then sets itself up in the
  *  background — a minute or two — and the roster page shows its progress. */
@@ -31,7 +32,6 @@ export function HireAgentModal({ onClose }: { onClose: () => void }) {
   const [role, setRole] = useState('')
   const [perTx, setPerTx] = useState('75')
   const [perPeriod, setPerPeriod] = useState('400')
-  const [budget, setBudget] = useState('')
   const nameRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
@@ -55,10 +55,8 @@ export function HireAgentModal({ onClose }: { onClose: () => void }) {
 
   const perTxBase = parseUsd(perTx)
   const perPeriodBase = parseUsd(perPeriod)
-  const budgetBase = budget.trim() === '' ? null : parseUsd(budget)
-  const capsValid = perTxBase !== null && perTxBase > 0n && perPeriodBase !== null && perPeriodBase > 0n
-  const budgetValid = budget.trim() === '' || (budgetBase !== null && budgetBase > 0n)
-  const canSubmit = capsValid && budgetValid && name.trim() !== '' && role.trim() !== '' && !submitting
+  const limitsValid = perTxBase !== null && perTxBase > 0n && perPeriodBase !== null && perPeriodBase > 0n
+  const canSubmit = limitsValid && name.trim() !== '' && role.trim() !== '' && !submitting
 
   const activePreset = PRESETS.find((p) => p.perTx === perTx && p.perPeriod === perPeriod && p.role === role)
 
@@ -81,8 +79,8 @@ export function HireAgentModal({ onClose }: { onClose: () => void }) {
           <div>
             <h2 className="modal-title" id="hire-title">Hire an agent</h2>
             <p className="modal-sub">
-              It sets itself up in the background — a minute or two — and joins the roster with these caps live
-              from its first transaction.
+              It sets itself up in the background — a minute or two — and joins the roster with these limits live
+              from its first purchase.
             </p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">×</button>
@@ -112,7 +110,7 @@ export function HireAgentModal({ onClose }: { onClose: () => void }) {
             <input id="hire-role" name="role" value={role} placeholder="What it is allowed to do" onChange={(e) => setRole(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="hire-pertx">Per-transaction cap</label>
+            <label htmlFor="hire-pertx">Per-purchase limit</label>
             <input
               id="hire-pertx"
               name="perTx"
@@ -123,7 +121,7 @@ export function HireAgentModal({ onClose }: { onClose: () => void }) {
             />
           </div>
           <div className="field">
-            <label htmlFor="hire-perperiod">Monthly cap</label>
+            <label htmlFor="hire-perperiod">Monthly limit</label>
             <input
               id="hire-perperiod"
               name="perPeriod"
@@ -133,35 +131,19 @@ export function HireAgentModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setPerPeriod(e.target.value)}
             />
           </div>
-          <div className="field field-wide">
-            <label htmlFor="hire-budget">Opening budget <span className="field-hint">— optional</span></label>
-            <input
-              id="hire-budget"
-              name="budget"
-              value={budget}
-              inputMode="decimal"
-              placeholder="Set aside from the treasury for this agent to spend"
-              data-invalid={!budgetValid}
-              onChange={(e) => setBudget(e.target.value)}
-            />
-          </div>
         </div>
 
         <p className="summary">
           <span className="summary-mark"><InfoIcon size={15} /></span>
           <span>
-            {capsValid ? (
+            {limitsValid ? (
               <>
-                Spends up to <strong>{usdWhole(perTxBase)}</strong> at a time,{' '}
-                <strong>{usdWhole(perPeriodBase)}</strong> a month. Anything larger waits for you.{' '}
-                {budgetBase ? (
-                  <>It starts with <strong>{usdWhole(budgetBase)}</strong> to spend.</>
-                ) : (
-                  <>With no opening budget it can't spend until you fund it.</>
-                )}
+                Spends up to <strong>{usdWhole(perTxBase)}</strong> per purchase and{' '}
+                <strong>{usdWhole(perPeriodBase)}</strong> a month, paid from your balance. Anything larger waits
+                for you.
               </>
             ) : (
-              <>Enter both caps as plain amounts — they take effect from the first transaction.</>
+              <>Enter both limits as plain amounts — they take effect from the first purchase.</>
             )}
           </span>
         </p>

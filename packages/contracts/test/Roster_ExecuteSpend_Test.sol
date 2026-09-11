@@ -17,7 +17,7 @@ contract Roster_ExecuteSpend_Test is RosterTestBase {
         assertEq(requestId, 0, "an executed spend opens no request");
         assertEq(usdc.balanceOf(pricer), PRICER_PER_TX, "funds land in the agent's own wallet");
         assertEq(_agent(pricer).periodSpend, PRICER_PER_TX);
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK - PRICER_PER_TX);
+        assertEq(_balance(), TREASURY - PRICER_PER_TX, "drawn from the shared balance");
     }
 
     /// One base unit over — the smallest overage USDC can express — holds instead of executing.
@@ -28,7 +28,7 @@ contract Roster_ExecuteSpend_Test is RosterTestBase {
         assertEq(requestId, 1);
         assertEq(usdc.balanceOf(pricer), 0, "a pending request moves no funds");
         assertEq(_agent(pricer).periodSpend, 0, "a pending request does not consume budget");
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK);
+        assertEq(_balance(), TREASURY);
     }
 
     // ─── the per-period cap ───────────────────────────────────────────────────
@@ -110,10 +110,8 @@ contract Roster_ExecuteSpend_Test is RosterTestBase {
 
         // Hire a third agent ten days in, so the two boundaries differ.
         vm.warp(pricerStart + 10 days);
-        vm.startPrank(owner);
+        vm.prank(owner);
         roster.hireAgent(stranger, 10 * USD, 100 * USD, "Later hire");
-        roster.fundAgent(stranger, 100 * USD);
-        vm.stopPrank();
         uint256 strangerStart = _agent(stranger).periodStart;
 
         _spend(pricer, PRICER_PER_TX);
@@ -128,26 +126,63 @@ contract Roster_ExecuteSpend_Test is RosterTestBase {
         assertEq(_agent(stranger).periodStart, strangerStart);
     }
 
-    // ─── funds and accounting ─────────────────────────────────────────────────
+    // ─── the shared balance ───────────────────────────────────────────────────
 
-    /// Over-cap is decided before funding is: an unfunded agent still gets a held request rather
-    /// than a revert, so the owner sees what it was trying to do.
-    function test_AnOverCapSpendHoldsEvenWithNothingEarmarked() public {
+    /// A newly hired agent can spend at once — its caps are its whole setup. There is no funding
+    /// step between hiring and the first purchase.
+    function test_ANewHireSpendsFromTheBalanceWithNoFundingStep() public {
         vm.prank(owner);
-        roster.hireAgent(stranger, 1 * USD, 5 * USD, "Unfunded");
+        roster.hireAgent(stranger, 10 * USD, 100 * USD, "Later hire");
 
-        (bool executed, uint256 requestId) = _spend(stranger, 100 * USD);
-        assertFalse(executed);
-        assertEq(requestId, 1);
+        (bool executed,) = _spend(stranger, 10 * USD);
+
+        assertTrue(executed);
+        assertEq(usdc.balanceOf(stranger), 10 * USD);
     }
 
-    function test_DrawsDownTheTreasuryAndTotalEarmarked() public {
-        assertEq(roster.totalEarmarked(), EARMARK * 2);
-
+    function test_EveryAgentDrawsFromTheSameBalance() public {
         _spend(pricer, PRICER_PER_TX);
+        _spend(concierge, CONCIERGE_PER_TX);
 
-        assertEq(roster.totalEarmarked(), EARMARK * 2 - PRICER_PER_TX);
-        assertEq(usdc.balanceOf(address(roster)), TREASURY - PRICER_PER_TX);
+        assertEq(_balance(), TREASURY - PRICER_PER_TX - CONCIERGE_PER_TX);
+    }
+
+    /// USDC that arrives is spendable immediately, by any agent within its caps.
+    function test_ADepositIsSpendableAtOnce() public {
+        vm.prank(owner);
+        roster.withdrawTreasury(owner, TREASURY);
+
+        usdc.mint(address(roster), CONCIERGE_PER_TX);
+
+        (bool executed,) = _spend(concierge, CONCIERGE_PER_TX);
+        assertTrue(executed);
+        assertEq(_balance(), 0);
+    }
+
+    /// The trade-off of one pool, stated as a test: the caps bound each agent, but the balance is
+    /// shared, so agents together can spend it down. What stops any one agent draining it is its
+    /// own monthly cap — pricer's here is well under the balance.
+    function test_TheBalanceIsFirstComeFirstServed() public {
+        vm.prank(owner);
+        roster.withdrawTreasury(owner, TREASURY - PRICER_PER_TX);
+
+        (bool executed,) = _spend(pricer, PRICER_PER_TX);
+        assertTrue(executed);
+
+        vm.prank(concierge);
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
+        roster.executeSpend(1, payee, MEMO);
+    }
+
+    /// Over-cap is decided before the balance is: a held request moves nothing, so it opens even
+    /// when the Roster is empty, and the owner still sees what the agent was trying to do.
+    function test_AnOverCapSpendHoldsEvenWithAnEmptyBalance() public {
+        vm.prank(owner);
+        roster.withdrawTreasury(owner, TREASURY);
+
+        (bool executed, uint256 requestId) = _spend(pricer, PRICER_PER_TX + 1);
+        assertFalse(executed);
+        assertEq(requestId, 1);
     }
 
     // ─── events (the dashboard's only data source, §4.5) ──────────────────────
@@ -173,13 +208,19 @@ contract Roster_ExecuteSpend_Test is RosterTestBase {
 
     // ─── reverts ──────────────────────────────────────────────────────────────
 
-    function test_RevertWhen_TheEarmarkCannotCoverAnInCapSpend() public {
+    /// Within both caps but more than the Roster holds: refused outright, not held. There is
+    /// nothing for the owner to approve — only money to add — and the reverted call charges the
+    /// period nothing.
+    function test_RevertWhen_TheBalanceCannotCoverAnInCapSpend() public {
         vm.prank(owner);
-        roster.hireAgent(stranger, 100 * USD, 500 * USD, "Unfunded");
+        roster.withdrawTreasury(owner, TREASURY - PRICER_PER_TX + 1);
 
-        vm.prank(stranger);
-        vm.expectRevert(IRoster.InsufficientEarmarkedBalance.selector);
-        roster.executeSpend(1 * USD, payee, MEMO);
+        vm.prank(pricer);
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
+        roster.executeSpend(PRICER_PER_TX, payee, MEMO);
+
+        assertEq(_agent(pricer).periodSpend, 0, "a refused spend charges nothing");
+        assertEq(roster.nextRequestId(), 0, "and opens no request");
     }
 
     function test_RevertWhen_TheCallerIsNotRegistered() public {

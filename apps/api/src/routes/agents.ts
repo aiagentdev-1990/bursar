@@ -30,14 +30,11 @@ const hireBody = z.object({
   role: z.string().min(1).max(200),
   perTxCap: baseUnits,
   perPeriodCap: baseUnits,
-  /// Optional opening earmark. Requires the Roster to already hold this much USDC (§4.6).
-  fundAmount: baseUnits.optional(),
   /// The agent's first task, sent once it is on the roster.
   briefing: z.string().min(1).max(4000).optional(),
 })
 
 const capsBody = z.object({ perTxCap: baseUnits, perPeriodCap: baseUnits })
-const fundBody = z.object({ amount: baseUnits })
 
 async function parse<T extends z.ZodTypeAny>(c: { req: { json: () => Promise<unknown> } }, schema: T): Promise<z.infer<T>> {
   let raw: unknown
@@ -141,7 +138,6 @@ agents.post('/', async (c) => {
       role: body.role,
       perTxCap: body.perTxCap,
       perPeriodCap: body.perPeriodCap,
-      fundAmount: body.fundAmount,
       briefing: body.briefing,
     })
     return c.json({ hire: toHireView(hire) }, 202)
@@ -186,7 +182,6 @@ agents.post('/', async (c) => {
   }
 
   await contract.hireAgent(wallet, body.perTxCap, body.perPeriodCap, role)
-  if (body.fundAmount) await contract.fundAgent(wallet, body.fundAmount)
   remember()
 
   const info = await contract.getAgent(wallet)
@@ -256,35 +251,6 @@ agents.post('/:id/revoke', async (c) => {
   return c.json({ agent: toAgentView(address, info, { hasOpenRequest: false }) })
 })
 
-// ─── POST /agents/:id/fund (§4.6) ───────────────────────────────────────────
-// Not in §6's table, which only lists the recurring schedule. Added because §4.6's one-off half
-// has to be reachable to fund the demo at all, and it maps straight onto §5's `fundAgent`.
-
-agents.post('/:id/fund', async (c) => {
-  const body = await parse(c, fundBody)
-  const { addresses } = await loadRoster()
-  const address = requireAddress(addresses, c.req.param('id'))
-
-  await contract.fundAgent(address, body.amount)
-
-  const info = await contract.getAgent(address)
-  return c.json({ agent: toAgentView(address, info, { hasOpenRequest: false }) })
-})
-
-// ─── POST /agents/:id/defund ────────────────────────────────────────────────
-// The counterpart to fund. Without it, revoking a funded agent stranded its remaining budget.
-
-agents.post('/:id/defund', async (c) => {
-  const body = await parse(c, fundBody)
-  const { addresses } = await loadRoster()
-  const address = requireAddress(addresses, c.req.param('id'))
-
-  await contract.defundAgent(address, body.amount)
-
-  const info = await contract.getAgent(address)
-  return c.json({ agent: toAgentView(address, info, { hasOpenRequest: false }) })
-})
-
 // ─── GET /agents/:id/activity (§4.5) ────────────────────────────────────────
 
 agents.get('/:id/activity', async (c) => {
@@ -305,7 +271,7 @@ agents.post('/:id/funding-schedule', () => {
   throw new ApiError(
     501,
     'bridge_kit_not_wired',
-    'Recurring top-ups need Bridge Kit (checkpoint 10), which is not wired yet. Use POST /agents/:id/fund.',
+    'Recurring top-ups need Bridge Kit (checkpoint 10), which is not wired yet. Add money with POST /treasury/deposit.',
   )
 })
 

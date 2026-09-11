@@ -23,7 +23,6 @@ export interface HireView {
   role: string
   perTxCap: string
   perPeriodCap: string
-  fundAmount?: string
   status: HireStatus
   failedAt?: HireStatus
   registered: boolean
@@ -42,7 +41,6 @@ export function toHireView(hire: HireRecord): HireView {
     role: hire.role,
     perTxCap: hire.perTxCap,
     perPeriodCap: hire.perPeriodCap,
-    fundAmount: hire.fundAmount,
     status: hire.status,
     failedAt: hire.failedAt,
     registered: hire.registered === true,
@@ -62,7 +60,6 @@ export interface AgentView {
   perTxCap: string
   perPeriodCap: string
   periodSpend: string
-  earmarkedBalance: string
   periodStart: string
   status: AgentStatus
   lastActivityAt?: string
@@ -82,7 +79,6 @@ export function toAgentView(
     perTxCap: info.perTxCap.toString(),
     perPeriodCap: info.perPeriodCap.toString(),
     periodSpend: info.periodSpend.toString(),
-    earmarkedBalance: info.earmarkedBalance.toString(),
     periodStart: info.periodStart.toString(),
     status: !info.active ? 'revoked' : opts.hasOpenRequest ? 'needs-review' : 'active',
     lastActivityAt: opts.lastActivityAt,

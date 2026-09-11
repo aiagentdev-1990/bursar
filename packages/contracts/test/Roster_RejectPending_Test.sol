@@ -21,9 +21,7 @@ contract Roster_RejectPending_Test is RosterTestBase {
 
         assertEq(usdc.balanceOf(pricer), 0);
         assertEq(_agent(pricer).periodSpend, 0);
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK);
-        assertEq(roster.totalEarmarked(), EARMARK * 2);
-        assertEq(usdc.balanceOf(address(roster)), TREASURY);
+        assertEq(_balance(), TREASURY);
     }
 
     function test_ClosesTheRequest() public {

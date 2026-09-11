@@ -4,46 +4,35 @@ pragma solidity ^0.8.26;
 import {IRoster} from "../src/IRoster.sol";
 import {RosterTestBase} from "./base/RosterTestBase.sol";
 
-/// The exit. Before this existed, USDC delivered to a Roster but never earmarked was locked in
-/// it forever — and §4.6's whole funding rail delivers to this address.
+/// The exit. §4.6's funding rail delivers to the Roster address, so without this any USDC sent
+/// here would be locked in forever.
+///
+/// Bounded by the balance and nothing else: a cap is permission to spend, not a claim on funds,
+/// so no agent is owed any part of the balance. DECISIONS.md 2026-09-11, "shared pool".
 contract Roster_WithdrawTreasury_Test is RosterTestBase {
-    /// The fixture mints TREASURY and earmarks EARMARK * 2; the rest is unallocated.
-    uint256 internal constant UNALLOCATED = TREASURY - EARMARK * 2;
-
-    function test_SendsUnallocatedUsdcToTheGivenAddress() public {
+    function test_SendsUsdcToTheGivenAddress() public {
         vm.prank(owner);
-        roster.withdrawTreasury(owner, UNALLOCATED);
+        roster.withdrawTreasury(owner, 100 * USD);
 
-        assertEq(usdc.balanceOf(owner), UNALLOCATED);
-        assertEq(usdc.balanceOf(address(roster)), TREASURY - UNALLOCATED);
+        assertEq(usdc.balanceOf(owner), 100 * USD);
+        assertEq(_balance(), TREASURY - 100 * USD);
     }
 
     function test_EmitsTreasuryWithdrawn() public {
         vm.expectEmit(true, false, false, true, address(roster));
-        emit IRoster.TreasuryWithdrawn(owner, UNALLOCATED);
+        emit IRoster.TreasuryWithdrawn(owner, 100 * USD);
 
         vm.prank(owner);
-        roster.withdrawTreasury(owner, UNALLOCATED);
+        roster.withdrawTreasury(owner, 100 * USD);
     }
 
-    function test_DoesNotChangeAnyEarmark() public {
+    /// The boundary is inclusive: the owner can take everything back.
+    function test_CanWithdrawTheWholeBalance() public {
         vm.prank(owner);
-        roster.withdrawTreasury(owner, UNALLOCATED);
+        roster.withdrawTreasury(owner, TREASURY);
 
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK);
-        assertEq(_agent(concierge).earmarkedBalance, EARMARK);
-        assertEq(roster.totalEarmarked(), EARMARK * 2);
-    }
-
-    /// The invariant this function must never break: every agent keeps what it was promised, so
-    /// an in-cap spend still works after the owner has drained everything unallocated.
-    function test_EveryEarmarkIsStillSpendableAfterADrain() public {
-        vm.prank(owner);
-        roster.withdrawTreasury(owner, UNALLOCATED);
-
-        (bool executed,) = _spend(pricer, PRICER_PER_TX);
-        assertTrue(executed);
-        assertEq(usdc.balanceOf(pricer), PRICER_PER_TX);
+        assertEq(_balance(), 0);
+        assertEq(usdc.balanceOf(owner), TREASURY);
     }
 
     function test_CanWithdrawToAThirdParty() public {
@@ -53,46 +42,57 @@ contract Roster_WithdrawTreasury_Test is RosterTestBase {
         assertEq(usdc.balanceOf(stranger), 100 * USD);
     }
 
-    /// Defunding an agent makes its budget withdrawable — the two halves of the fix together.
-    function test_DefundedBudgetBecomesWithdrawable() public {
-        vm.startPrank(owner);
-        roster.defundAgent(pricer, EARMARK);
-        roster.withdrawTreasury(owner, UNALLOCATED + EARMARK);
-        vm.stopPrank();
+    /// Withdrawing changes no agent's caps or period — it only changes what there is to spend.
+    function test_DoesNotChangeAnyAgent() public {
+        _spend(pricer, PRICER_PER_TX);
+        IRoster.AgentInfo memory before = _agent(pricer);
+        uint256 everything = _balance();
 
-        assertEq(usdc.balanceOf(owner), UNALLOCATED + EARMARK);
-        assertEq(usdc.balanceOf(address(roster)), EARMARK, "only the other agent's earmark left");
+        vm.prank(owner);
+        roster.withdrawTreasury(owner, everything);
+
+        IRoster.AgentInfo memory after_ = _agent(pricer);
+        assertEq(after_.perTxCap, before.perTxCap);
+        assertEq(after_.perPeriodCap, before.perPeriodCap);
+        assertEq(after_.periodSpend, before.periodSpend);
+        assertTrue(after_.active);
     }
 
-    function test_WithdrawingExactlyTheUnallocatedBalanceSucceeds() public {
+    /// After a full withdrawal an in-cap spend is refused for want of money, not for want of
+    /// permission — and adding money back makes the same spend work with no other step.
+    function test_AnEmptiedBalanceStopsSpendingUntilMoneyIsAdded() public {
         vm.prank(owner);
-        roster.withdrawTreasury(owner, UNALLOCATED);
+        roster.withdrawTreasury(owner, TREASURY);
 
-        assertEq(usdc.balanceOf(address(roster)), roster.totalEarmarked(), "nothing spare remains");
+        vm.prank(pricer);
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
+        roster.executeSpend(PRICER_PER_TX, payee, MEMO);
+
+        usdc.mint(address(roster), PRICER_PER_TX);
+
+        (bool executed,) = _spend(pricer, PRICER_PER_TX);
+        assertTrue(executed);
     }
 
     // ─── reverts ──────────────────────────────────────────────────────────────
 
-    /// The whole point: an earmark cannot be withdrawn out from under an agent.
-    function test_RevertWhen_WithdrawingOneBaseUnitPastTheUnallocatedBalance() public {
+    function test_RevertWhen_WithdrawingOneBaseUnitPastTheBalance() public {
         vm.prank(owner);
-        vm.expectRevert(IRoster.InsufficientTreasury.selector);
-        roster.withdrawTreasury(owner, UNALLOCATED + 1);
-    }
-
-    function test_RevertWhen_WithdrawingAnEarmarkedBalance() public {
-        vm.startPrank(owner);
-        roster.withdrawTreasury(owner, UNALLOCATED);
-
-        vm.expectRevert(IRoster.InsufficientTreasury.selector);
-        roster.withdrawTreasury(owner, 1);
-        vm.stopPrank();
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
+        roster.withdrawTreasury(owner, TREASURY + 1);
     }
 
     function test_RevertWhen_TheCallerIsNotTheOwner() public {
         vm.prank(stranger);
         vm.expectRevert(IRoster.NotOwner.selector);
         roster.withdrawTreasury(stranger, 1);
+    }
+
+    /// Not even an agent can pull from the shared balance except through its own capped spend.
+    function test_RevertWhen_AnAgentTriesToWithdraw() public {
+        vm.prank(pricer);
+        vm.expectRevert(IRoster.NotOwner.selector);
+        roster.withdrawTreasury(pricer, 1);
     }
 
     function test_RevertWhen_TheDestinationIsTheZeroAddress() public {

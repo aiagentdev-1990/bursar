@@ -21,14 +21,15 @@ function AgentRow({ agent }: { agent: Agent }) {
 
       <div>
         <div className="spend-row">
-          {/* Transaction-scale figure: always two decimals. The cap beside it is a round
+          {/* Transaction-scale figure: always two decimals. The limit beside it is a round
               secondary figure, so it renders bare. docs/mockups/README.md, "Money". */}
           <span className="spend-amount">{usd(agent.periodSpend)}</span>
-          <span className="spend-cap">{usdWhole(agent.perPeriodCap)} cap</span>
+          <span className="spend-cap">of {usdWhole(agent.perPeriodCap)}</span>
         </div>
         <div className="bar">
           <div className="bar-fill" style={{ width: `${fill}%` }} />
         </div>
+        <div className="spend-limit">up to {usdWhole(agent.perTxCap)} per purchase</div>
       </div>
 
       <div className="col-status">
@@ -51,7 +52,7 @@ export function AgentTable({ agents }: { agents: Agent[] }) {
         <span className="eyebrow">Agent</span>
         <span className="eyebrow col-category">Category</span>
         <span className="eyebrow col-trend">Trend</span>
-        <span className="eyebrow">Spent this period</span>
+        <span className="eyebrow">Spent this month</span>
         <span className="eyebrow col-status">Status</span>
         <span className="eyebrow col-activity">Last activity</span>
         <span className="col-overflow" />

@@ -90,10 +90,6 @@ contract RosterFactory_CreateRoster_Test is Test {
 
         usdc.mint(address(alices), 500 * USD);
         usdc.mint(address(bobs), 500 * USD);
-        vm.prank(alice);
-        alices.fundAgent(sharedAgent, 100 * USD);
-        vm.prank(bob);
-        bobs.fundAgent(sharedAgent, 500 * USD);
 
         // Caps do not leak across teams.
         assertEq(alices.getAgent(sharedAgent).perTxCap, 10 * USD);
@@ -112,7 +108,8 @@ contract RosterFactory_CreateRoster_Test is Test {
         assertTrue(bobs.getAgent(sharedAgent).active);
     }
 
-    /// Each clone keeps its own treasury: USDC sent to one is invisible to the other.
+    /// Each clone keeps its own balance: USDC sent to one is invisible to the other. The same
+    /// agent can spend on the team that has money and is refused on the one that has none.
     function test_TreasuriesAreSeparate() public {
         Roster alices = Roster(factory.createRoster(alice));
         Roster bobs = Roster(factory.createRoster(bob));
@@ -124,12 +121,13 @@ contract RosterFactory_CreateRoster_Test is Test {
 
         usdc.mint(address(alices), 100 * USD);
 
-        vm.prank(alice);
-        alices.fundAgent(sharedAgent, 100 * USD);
+        vm.prank(sharedAgent);
+        (bool executed,) = alices.executeSpend(10 * USD, payee, "");
+        assertTrue(executed);
 
-        vm.prank(bob);
-        vm.expectRevert(IRoster.InsufficientTreasury.selector);
-        bobs.fundAgent(sharedAgent, 1);
+        vm.prank(sharedAgent);
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
+        bobs.executeSpend(1, payee, "");
     }
 
     /// The factory is permissionless: the backend calls it on an owner's behalf, and the owner it

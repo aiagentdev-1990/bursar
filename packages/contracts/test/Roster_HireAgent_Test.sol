@@ -22,14 +22,15 @@ contract Roster_HireAgent_Test is RosterTestBase {
         assertTrue(info.active);
     }
 
-    /// A new agent starts with a clean period and nothing earmarked. Funding is a separate step.
-    function test_StartsWithAZeroedPeriodAndNoBalance() public {
+    /// A new agent starts with a clean period, and hiring moves no money.
+    function test_StartsWithAZeroedPeriodAndMovesNoFunds() public {
         vm.prank(owner);
         roster.hireAgent(stranger, PER_TX, PER_PERIOD, ROLE);
 
         IRoster.AgentInfo memory info = _agent(stranger);
         assertEq(info.periodSpend, 0);
-        assertEq(info.earmarkedBalance, 0);
+        assertEq(_balance(), TREASURY);
+        assertEq(usdc.balanceOf(stranger), 0, "an agent holds nothing standing");
         assertEq(info.periodStart, block.timestamp, "the period is anchored to the hire");
     }
 
@@ -43,10 +44,8 @@ contract Roster_HireAgent_Test is RosterTestBase {
 
     /// The caps are live immediately — there is no arming step between hiring and enforcement.
     function test_CapsBindOnTheVeryFirstSpend() public {
-        vm.startPrank(owner);
+        vm.prank(owner);
         roster.hireAgent(stranger, PER_TX, PER_PERIOD, ROLE);
-        roster.fundAgent(stranger, 500 * USD);
-        vm.stopPrank();
 
         (bool overCap,) = _spend(stranger, PER_TX + 1);
         assertFalse(overCap, "one base unit over holds on the first transaction");
@@ -65,7 +64,6 @@ contract Roster_HireAgent_Test is RosterTestBase {
         IRoster.AgentInfo memory after_ = _agent(pricer);
         assertEq(after_.perTxCap, before.perTxCap);
         assertEq(after_.perPeriodCap, before.perPeriodCap);
-        assertEq(after_.earmarkedBalance, before.earmarkedBalance);
         assertEq(after_.periodStart, before.periodStart);
     }
 

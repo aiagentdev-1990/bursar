@@ -11,7 +11,6 @@
 //   GET    /agents/:id                    detail
 //   PATCH  /agents/:id/caps               updateCaps
 //   POST   /agents/:id/revoke             revokeAgent (§4.4)
-//   POST   /agents/:id/fund               fundAgent (§4.6, one-off)
 //   GET    /agents/:id/activity           Blockscout proxy (§4.5)
 //   POST   /agents/:id/funding-schedule   Bridge Kit payroll (§4.6) — 501 until checkpoint 10
 //   GET    /pending                       all open pending requests
@@ -19,6 +18,9 @@
 //   POST   /pending/:requestId/approve    approvePending, THEN the Claude session-resume event (§4.3)
 //   POST   /pending/:requestId/reject     rejectPending
 //   GET    /activity                      whole-roster feed (§4.5)
+//   GET    /treasury                      the shared balance every agent spends from
+//   POST   /treasury/deposit              "add money" — owner wallet → Roster (§4.6, one-off)
+//   POST   /treasury/withdraw             withdrawTreasury, to the owner
 //
 // Plus, not an endpoint: the PaymentPending listener in listener.ts (checkpoint 7).
 

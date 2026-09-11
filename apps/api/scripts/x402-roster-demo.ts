@@ -28,7 +28,7 @@ if (!ROSTER) throw new Error('ROSTER_CONTRACT_ADDRESS is not set')
 
 const PER_TX_CAP = 8_000n // $0.008
 const PER_PERIOD_CAP = 50_000n // $0.05
-const EARMARK = 50_000n // $0.05 held in the Roster for this agent
+const DEPOSIT = 50_000n // $0.05 added to the Roster's shared balance
 /// Native USDC for the agent's own executeSpend transactions. Sized from measured Arc gas costs.
 const GAS_FLOAT = BigInt(process.env.AGENT_GAS_FLOAT ?? '20000')
 
@@ -124,7 +124,8 @@ if (!address) {
 }
 console.log(`agent wallet  ${address}`)
 
-// 3. The owner hires it: caps on the Roster, allowance earmarked, a little gas in its wallet.
+// 3. The owner hires it: caps on the Roster, money in the Roster's shared balance, a little gas
+//    in its wallet.
 console.log('owner:')
 await ownerTx('hireAgent', {
   address: ROSTER,
@@ -132,8 +133,7 @@ await ownerTx('hireAgent', {
   functionName: 'hireAgent',
   args: [address, PER_TX_CAP, PER_PERIOD_CAP, 'x402 test|Automated paid-data purchase test'],
 })
-await ownerTx('fund Roster treasury', { address: USDC, abi: erc20Abi, functionName: 'transfer', args: [ROSTER, EARMARK] })
-await ownerTx('fundAgent', { address: ROSTER, abi: rosterAbi, functionName: 'fundAgent', args: [address, EARMARK] })
+await ownerTx('add money to the Roster', { address: USDC, abi: erc20Abi, functionName: 'transfer', args: [ROSTER, DEPOSIT] })
 await ownerTx('gas float to agent', { address: USDC, abi: erc20Abi, functionName: 'transfer', args: [address, GAS_FLOAT] })
 const walletStart = await usdcOf(address)
 
@@ -177,5 +177,5 @@ const info = await agentInfo(address)
 const walletEnd = await usdcOf(address)
 console.log('\n--- on-chain ---')
 console.log(`  spent this period   ${usd(info.periodSpend)}  (cap ${usd(info.perPeriodCap)})`)
-console.log(`  still earmarked     ${usd(info.earmarkedBalance)}`)
+console.log(`  roster balance      ${usd(await usdcOf(ROSTER))}`)
 console.log(`  agent wallet        ${usd(walletStart)} -> ${usd(walletEnd)}  (gas used ${usd(walletStart - walletEnd)})`)

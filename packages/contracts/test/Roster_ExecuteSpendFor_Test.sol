@@ -88,8 +88,22 @@ contract Roster_ExecuteSpendFor_Test is RosterTestBase {
         assertEq(usdc.balanceOf(pricer), PRICER_PER_TX, "released to the agent, exactly");
         assertEq(usdc.balanceOf(relayer), 0, "the relayer never receives funds");
         assertEq(_agent(pricer).periodSpend, PRICER_PER_TX);
-        assertEq(_agent(pricer).earmarkedBalance, EARMARK - PRICER_PER_TX);
+        assertEq(_balance(), TREASURY - PRICER_PER_TX, "drawn from the shared balance");
         assertEq(roster.nonces(pricer), 1);
+    }
+
+    /// The relay simulates before it sends, so this is the error an agent sees when its owner's
+    /// balance is empty. The reverted call leaves the signature unused.
+    function test_RevertWhen_TheBalanceCannotCoverIt_AndTheNonceIsNotConsumed() public {
+        vm.prank(owner);
+        roster.withdrawTreasury(owner, TREASURY);
+
+        (bytes memory signature, uint256 deadline) = _signed(pricerKey, pricer, PRICER_PER_TX);
+
+        vm.expectRevert(IRoster.InsufficientBalance.selector);
+        _relay(pricer, PRICER_PER_TX, deadline, signature);
+
+        assertEq(roster.nonces(pricer), 0);
     }
 
     // ─── the same caps as executeSpend ────────────────────────────────────────
@@ -228,9 +242,7 @@ contract Roster_ExecuteSpendFor_Test is RosterTestBase {
         Roster other = Roster(factory.createRoster(owner));
         vm.prank(owner);
         other.hireAgent(pricer, PRICER_PER_TX, PRICER_PER_PERIOD, "Comparable-listing research");
-        usdc.mint(address(other), EARMARK);
-        vm.prank(owner);
-        other.fundAgent(pricer, EARMARK);
+        usdc.mint(address(other), TREASURY);
 
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory forOther = _sign(pricerKey, other, Spend(pricer, 1, payee, MEMO, 0, deadline));

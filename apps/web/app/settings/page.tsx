@@ -14,7 +14,8 @@ export default function Settings() {
         </div>
       </div>
       <p className="prose">
-        Funding, the payroll schedule, and the owner&rsquo;s own wallet live here once checkpoint 10 lands.
+        Recurring top-ups and the owner&rsquo;s own wallet live here once checkpoint 10 lands. To add money now,
+        use <strong>Add money</strong> on the roster page.
       </p>
     </>
   )

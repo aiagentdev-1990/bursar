@@ -6,7 +6,7 @@ import type { HireRecord } from './store.js'
 
 /// The hire job's step logic against fakes — no Claude, no chain. What matters is the order of
 /// effects (nothing on-chain before the agent reports a wallet), that a failure says where it
-/// stopped, and that a resumed hire never registers or funds twice.
+/// stopped, and that a resumed hire never registers twice.
 
 const WALLET = '0x1111111111111111111111111111111111111111' as Address
 const ROSTER = '0x2222222222222222222222222222222222222222' as Address
@@ -16,14 +16,12 @@ const INPUT: HireInput = {
   role: 'Watch market research',
   perTxCap: 10_000n,
   perPeriodCap: 100_000n,
-  fundAmount: 50_000n,
   briefing: 'Buy the market price for ref. 145.022.',
 }
 
 function setup(over: {
   wallet?: () => Promise<Address>
   alreadyRegistered?: boolean
-  earmark?: bigint
   relayUrl?: string | undefined
   hireFails?: Error
 } = {}) {
@@ -50,14 +48,11 @@ function setup(over: {
       enabled: true,
       rosterAddress: ROSTER,
       async getAgent() {
-        return { registered: over.alreadyRegistered ?? false, earmarkedBalance: over.earmark ?? 0n }
+        return { registered: over.alreadyRegistered ?? false }
       },
       async hireAgent(agent, perTx, perPeriod, label) {
         if (over.hireFails) throw over.hireFails
         calls.push(`hire ${agent} ${perTx} ${perPeriod} ${label}`)
-      },
-      async fundAgent(_agent, amount) {
-        calls.push(`fund ${amount}`)
       },
     },
     store: {
@@ -88,13 +83,13 @@ test('answers at once, then runs the hire to active in order', async () => {
 
   assert.ok(at(calls, 'session') < at(calls, 'wallet'), 'the agent exists before its wallet is awaited')
   assert.ok(at(calls, 'wallet') < at(calls, 'hire'), 'nothing is registered before the agent reports a wallet')
-  assert.ok(at(calls, 'hire') < at(calls, 'fund'), 'funded only once registered')
-  assert.ok(at(calls, 'fund') < at(calls, 'brief'), 'told where its allowance lives only once it has one')
+  assert.ok(at(calls, 'hire') < at(calls, 'brief'), 'told where its allowance lives only once it has one')
 
   assert.ok(calls.includes(`hire ${WALLET} 10000 100000 Courier|Watch market research`), 'registered with the reported wallet and caps')
   const brief = calls.find((c) => c.startsWith('brief'))!
   assert.match(brief, new RegExp(ROSTER))
   assert.match(brief, /https:\/\/relay\.example/)
+  assert.match(brief, /shares/, 'told it spends from the shared balance')
   assert.match(brief, /Buy the market price/)
 })
 
@@ -125,9 +120,9 @@ test('a registration failure is reported against that step, still unregistered',
   assert.notEqual(final.registered, true)
 })
 
-test('a hire resumed after a restart does not register or fund twice', async () => {
-  // Interrupted after hireAgent and fundAgent landed, before the step was recorded.
-  const { jobs, calls, hires } = setup({ alreadyRegistered: true, earmark: 50_000n })
+test('a hire resumed after a restart does not register twice', async () => {
+  // Interrupted after hireAgent landed, before the step was recorded.
+  const { jobs, calls, hires } = setup({ alreadyRegistered: true })
   const now = new Date().toISOString()
   hires.set('hire_resumed', {
     id: 'hire_resumed',
@@ -135,7 +130,6 @@ test('a hire resumed after a restart does not register or fund twice', async () 
     role: 'Watch market research',
     perTxCap: '10000',
     perPeriodCap: '100000',
-    fundAmount: '50000',
     status: 'registering',
     sessionId: 'sesn_1',
     wallet: WALLET,
@@ -149,7 +143,6 @@ test('a hire resumed after a restart does not register or fund twice', async () 
   const final = await jobs.run('hire_resumed')
   assert.equal(final.status, 'active')
   assert.equal(at(calls, 'hire'), -1, 'already registered — not registered again')
-  assert.equal(at(calls, 'fund'), -1, 'already funded — not funded again')
   assert.notEqual(at(calls, 'brief'), -1, 'and the agent is still briefed')
 })
 

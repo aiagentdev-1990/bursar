@@ -2,6 +2,50 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-11 — One shared balance: `fundAgent` is gone
+The per-agent earmark made the owner do the same job twice: set an agent's caps, then fund it
+separately — and a freshly hired agent with caps but no earmark looked broken. The dashboard had
+to explain "earmarked", "unallocated" and "in agent budgets" side by side, and the figures read
+as if agents could spend more than the Roster held. Chose the expense-card model instead: the
+Roster's balance is the company account, and each agent's two caps are its card's limits.
+
+**Contract (redeployed — see the deployment entry below):**
+
+- Removed `fundAgent`, `defundAgent`, `AgentInfo.earmarkedBalance`, `totalEarmarked`, the
+  `AllowanceFunded`/`AllowanceDefunded` events and both `InsufficientEarmarkedBalance` and
+  `InsufficientTreasury`. One new error, `InsufficientBalance`.
+- An in-cap spend transfers from the Roster's balance, or reverts `InsufficientBalance` if the
+  balance is short. **Refused, not held** — there is nothing for the owner to approve, only money
+  to add. An over-cap spend still holds even on an empty balance, since holding moves nothing.
+- An approval on a short balance reverts and leaves the request open to approve again later.
+- `withdrawTreasury` is bounded by the balance and nothing else. No agent is owed any of it.
+- Deposits need no function: any USDC transfer to the Roster is spendable at once (§4.6).
+- Unchanged: both caps, the lazy reset, the pending path, `executeSpendFor`, and revocation's
+  one-struct isolation.
+
+**The trade-off, stated plainly:** caps are now permissions, not promises. Agents draw on one pool,
+first come first served, so one agent's spend can leave less for another. What bounds any single
+agent is its own monthly cap; what bounds the team is the balance. The earmark guaranteed each
+agent its budget, but at the cost of a funding step per agent. For a solo owner with a handful of
+agents, that guarantee was not worth the step. When the agents' remaining monthly limits add up
+to more than the balance, the dashboard says so.
+
+**API:** `POST /agents/:id/fund` and `/defund` removed; the hire body loses `fundAmount`. `GET
+/treasury` is `{ balance, ownerBalance }`; `POST /treasury/deposit` ("Add money") is a USDC
+transfer from the owner's wallet through the owner queue. The hire job has no funding step.
+
+**Dashboard:** Balance with **Add money** at the top; each agent reads "$X of $Y" this month, "up
+to $Z per purchase". The hire form asks for a name, a role and the two limits — no budget. Owner
+copy says "limit" throughout, never "cap", "budget", "earmark" or "treasury". The contract and
+API keep the `perTxCap`/`perPeriodCap` names.
+
+**Skills:** `getAgent` loses a field, and the skills decode it by hand, so both were updated. They
+read the Roster's balance directly, and explain `InsufficientBalance` as "your owner's account is
+empty".
+
+Supersedes the per-agent parts of 2026-09-09's funds-out entry and 2026-09-08's `fundAgent`
+entry, and the hiring job's "opening budget".
+
 ## 2026-09-11 — Hiring runs as a background job
 `POST /agents` answers `202` at once with a hire record. A job (`apps/api/src/services/hires.ts`)
 then creates the agent and its session, waits for the wallet its skill reports, registers and
@@ -16,8 +60,8 @@ progress row per hire and refreshes itself until it finishes.
 - **Owner writes go through one queue.** Two hires finishing together, or a hire landing during an
   approval, would otherwise collide on the owner's nonce.
 - **Without a Claude runtime (tests, dev) the hire stays synchronous** — there is nothing to wait on.
-- **The hire form gains an optional opening budget.** Without one a new agent cannot spend until
-  the owner funds it, which made a freshly hired agent look broken.
+- ~~**The hire form gains an optional opening budget.**~~ Superseded the same day: agents spend
+  from one shared balance, so there is nothing to fund (see "One shared balance" above).
 
 ## 2026-09-11 — Hiring: a new agent per hire, and the agent makes its own wallet
 `POST /agents` now runs in this order: create a Managed Agents **Agent** for this hire with the
@@ -78,21 +122,26 @@ Known gap: an agent can make the relayer pay gas for unlimited over-cap requests
 consume no budget). Bounded by the relayer's small balance; rate-limit the route if it matters.
 
 ## 2026-09-11 — Deployed; the dashboard reads live state through apps/api
-**Deployment (Arc testnet, block 61518811, source verified on ArcScan)** — redeployed the same day
-to ship `executeSpendFor` (see the entry above):
+**Deployment (Arc testnet, block 61547494, source verified on ArcScan)** — the third deployment,
+shipping the shared balance (see "One shared balance" above):
 
 | | Address |
 |---|---|
-| Roster — the demo owner's team (`ROSTER_CONTRACT_ADDRESS`) | `0x17a021A777A231509e6ddb13772CD32AB10ad258` |
-| RosterFactory (`ROSTER_FACTORY_ADDRESS`) | `0x3e048665cab30e989A8de68E5F410fB3c0De2864` |
-| Roster implementation | `0xaC733D08E1BF74f7589b0c6003cB57f6AaA6Aa1D` |
+| Roster — the demo owner's team (`ROSTER_CONTRACT_ADDRESS`) | `0x823C07bd183405E6FDf3e2e0412315D3B6fDfBBa` |
+| RosterFactory (`ROSTER_FACTORY_ADDRESS`) | `0xB823f2bD564D65439F84956Cc2b210540cCe60C0` |
+| Roster implementation | `0x504fb7A963D649f8D5c647224504D1AeFF08D360` |
 | Owner / deployer | `0x1BAB12dd29E89455752613055EC6036eD6c17ccf` |
 | Relayer (`RELAYER_PRIVATE_KEY`) | `0x6BDF83FD0F7f1FfD167891F3914120DEb1935f2c` |
 
-Retired: the first deployment (Roster `0x3BcC5Ff272F72c2a770D5E031699CFCe70287d80`, factory
-`0xFfF59e42eEF09D6859b8Adc2b8D8679BF849b40D`, block 61507239). Drained to the owner with
-`pnpm --filter @roster/api drain` before the redeploy; it holds nothing. Not upgradeable by
-design, so a new function means a new Roster.
+Retired, each drained to the owner before the next deploy, and holding nothing. None is
+upgradeable, by design, so a changed function means a new Roster:
+
+- **The second deployment** (`executeSpendFor`, block 61518811): Roster
+  `0x17a021A777A231509e6ddb13772CD32AB10ad258`, factory `0x3e048665cab30e989A8de68E5F410fB3c0De2864`.
+  Its $3.295 was mostly earmarked. The current ABI has no `defundAgent`, so a one-off script with
+  the old fragments inlined defunded each agent, then withdrew everything (tx `0x2134b99b…e2d9`).
+- **The first deployment** (block 61507239): Roster `0x3BcC5Ff272F72c2a770D5E031699CFCe70287d80`,
+  factory `0xFfF59e42eEF09D6859b8Adc2b8D8679BF849b40D`.
 
 **ArcScan is Blockscout.** `/api/v2/addresses/{addr}/logs` answers in the shape `apps/api`
 already decodes, `block_timestamp` included. That was checkpoint 9's first question; it is now

@@ -22,7 +22,6 @@ export const hireJobs = createHireJobs({
     rosterAddress: ROSTER_ADDRESS,
     getAgent: contract.getAgent,
     hireAgent: contract.hireAgent,
-    fundAgent: contract.fundAgent,
   },
   store,
   relayUrl: loadEnv().RELAY_PUBLIC_URL,

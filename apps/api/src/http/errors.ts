@@ -22,13 +22,9 @@ const CONTRACT_ERRORS: Record<string, { status: 400 | 403 | 404 | 409; message: 
   AgentNotActive: { status: 409, message: 'That agent has been revoked.' },
   AgentAlreadyRegistered: { status: 409, message: 'That wallet is already on the roster.' },
   RequestNotOpen: { status: 409, message: 'That request has already been approved or rejected.' },
-  InsufficientEarmarkedBalance: {
+  InsufficientBalance: {
     status: 409,
-    message: "The agent's earmarked balance no longer covers this amount.",
-  },
-  InsufficientTreasury: {
-    status: 400,
-    message: "The roster doesn't hold enough USDC to earmark that much. Fund it first.",
+    message: "The roster's balance doesn't cover this amount. Add money, then try again.",
   },
   ZeroCap: { status: 400, message: 'Both caps must be greater than zero.' },
   ZeroAddress: { status: 400, message: 'A zero address was supplied.' },

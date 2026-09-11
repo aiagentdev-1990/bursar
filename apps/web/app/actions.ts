@@ -20,23 +20,14 @@ export async function hireAgent(_previous: HireFormState, form: FormData): Promi
   const role = field('role')
   const perTx = parseUsd(field('perTx'))
   const perPeriod = parseUsd(field('perPeriod'))
-  const budgetText = field('budget')
-  const budget = budgetText === '' ? null : parseUsd(budgetText)
 
   if (!name || !role) return { error: 'Give the agent a name and a role.' }
-  if (!perTx || !perPeriod) return { error: 'Enter both caps as amounts greater than zero.' }
-  if (budgetText !== '' && !budget) return { error: 'Enter the opening budget as a plain amount, or leave it empty.' }
+  if (!perTx || !perPeriod) return { error: 'Enter both limits as amounts greater than zero.' }
 
   try {
     await api('/agents', {
       method: 'POST',
-      body: {
-        name,
-        role,
-        perTxCap: perTx.toString(),
-        perPeriodCap: perPeriod.toString(),
-        ...(budget ? { fundAmount: budget.toString() } : {}),
-      },
+      body: { name, role, perTxCap: perTx.toString(), perPeriodCap: perPeriod.toString() },
     })
   } catch (error) {
     if (error instanceof ApiRequestError || error instanceof ApiUnavailable) return { error: error.message }
@@ -45,6 +36,29 @@ export async function hireAgent(_previous: HireFormState, form: FormData): Promi
 
   revalidatePath('/', 'layout')
   return { acceptedAt: Date.now() }
+}
+
+export interface AddMoneyState {
+  error?: string
+  /** Set when the deposit is mined — the dialog closes on a change to this. */
+  addedAt?: number
+}
+
+/// "Add money": moves USDC from the owner's wallet into the roster's balance, which every agent
+/// spends from. Waits for the transaction, so the page re-renders with the new balance.
+export async function addMoney(_previous: AddMoneyState, form: FormData): Promise<AddMoneyState> {
+  const amount = parseUsd(String(form.get('amount') ?? ''))
+  if (!amount) return { error: 'Enter an amount greater than zero.' }
+
+  try {
+    await api('/treasury/deposit', { method: 'POST', body: { amount: amount.toString() } })
+  } catch (error) {
+    if (error instanceof ApiRequestError || error instanceof ApiUnavailable) return { error: error.message }
+    throw error
+  }
+
+  revalidatePath('/', 'layout')
+  return { addedAt: Date.now() }
 }
 
 /// Clears a failed hire the owner has read.

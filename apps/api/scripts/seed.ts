@@ -1,6 +1,6 @@
 // Funds the deployed Roster and plays a morning of agent activity against it, so the dashboard
 // has real on-chain state to read. Every step is a real transaction on Arc testnet: the owner
-// hires and earmarks through the same wrappers the API uses, and each agent signs its own spend
+// hires and adds money through the same wrappers the API uses, and each agent signs its own spend
 // with its own key, submitted by the relayer (`executeSpendFor`, the same call POST /relay/spend
 // makes). Agents hold no gas — DECISIONS.md 2026-09-11. Nothing is faked off-chain: the caps you
 // see enforced here are enforced by the contract, including the two requests that go pending.
@@ -11,8 +11,8 @@
 // spend where it started, at zero. (An earlier version released and stopped, stranding every
 // amount; `pnpm --filter @roster/api sweep` recovered those.)
 //
-//   pnpm --filter @roster/api seed             fund the treasury, hire the five demo agents,
-//                                              earmark their budgets, run the scripted morning
+//   pnpm --filter @roster/api seed             top up the roster's balance, hire the five demo
+//                                              agents, run the scripted morning
 //   pnpm --filter @roster/api seed activity    one more in-cap spend per agent, for a live feed
 //
 // Idempotent where it matters: agents are matched by name in .roster-store.json and only hired
@@ -60,22 +60,21 @@ interface DemoAgent {
   role: string
   perTxCap: bigint
   perPeriodCap: bigint
-  /// Opening budget earmarked from the treasury. Sized to cover the scripted morning below with
-  /// room left over — Runner's remainder is deliberately enough to approve its held request live.
-  earmark: bigint
 }
 
 const AGENTS: DemoAgent[] = [
-  { name: 'Pricer', role: 'Comparable-listing research', perTxCap: usdc('0.25'), perPeriodCap: usdc('3'), earmark: usdc('2') },
-  { name: 'Concierge', role: 'Buyer questions and offers', perTxCap: usdc('0.20'), perPeriodCap: usdc('1.50'), earmark: usdc('0.80') },
-  { name: 'Runner', role: 'One-off task payouts', perTxCap: usdc('0.75'), perPeriodCap: usdc('4'), earmark: usdc('3') },
-  { name: 'Scout', role: 'Auction and estate sourcing', perTxCap: usdc('0.50'), perPeriodCap: usdc('2.50'), earmark: usdc('2') },
-  { name: 'Ledger', role: 'Bookkeeping and reconciliation', perTxCap: usdc('0.40'), perPeriodCap: usdc('2'), earmark: usdc('1.60') },
+  { name: 'Pricer', role: 'Comparable-listing research', perTxCap: usdc('0.25'), perPeriodCap: usdc('3') },
+  { name: 'Concierge', role: 'Buyer questions and offers', perTxCap: usdc('0.20'), perPeriodCap: usdc('1.50') },
+  { name: 'Runner', role: 'One-off task payouts', perTxCap: usdc('0.75'), perPeriodCap: usdc('4') },
+  { name: 'Scout', role: 'Auction and estate sourcing', perTxCap: usdc('0.50'), perPeriodCap: usdc('2.50') },
+  { name: 'Ledger', role: 'Bookkeeping and reconciliation', perTxCap: usdc('0.40'), perPeriodCap: usdc('2') },
 ]
 
-/// Left unallocated in the treasury on top of the earmarks, so `GET /treasury` and a live
-/// `fundAgent` during the demo have headroom.
-const TREASURY_HEADROOM = usdc('0.60')
+/// The roster's shared balance before the morning. The morning releases $5.73 and leaves Runner's
+/// $1.20 request held, so this leaves enough to approve it live on stage, plus a little for
+/// `seed activity`. Deliberately less than the monthly limits add up to ($13) — the dashboard's
+/// low-balance warning is part of the demo, and it is also just what testnet money allows.
+const TREASURY_TARGET = usdc('7.50')
 
 /// The relayer pays every agent's gas. On Arc the ERC-20 predeploy and the native gas asset are
 /// the same balance, so a USDC transfer is also a gas top-up. A relayed spend costs well under a
@@ -205,6 +204,21 @@ async function ensureHired(demo: DemoAgent): Promise<Hired | undefined> {
   return { demo, address, key, fresh: true }
 }
 
+/// Tops the roster's balance up to `target` from the owner's wallet — "add money", the same call
+/// POST /treasury/deposit makes. Never withdraws: a balance already above target is left alone.
+async function ensureBalance(target: bigint) {
+  const balance = await contract.getBalance()
+  if (balance >= target) return
+
+  const deficit = target - balance
+  const wallet = await contract.getOwnerWalletBalance()
+  if (wallet < deficit + RELAYER_GAS) {
+    throw new Error(`The owner holds ${fmt(wallet)} but seeding needs ${fmt(deficit + RELAYER_GAS)}. Top up from the Arc faucet.`)
+  }
+  await contract.depositFromOwner(deficit)
+  console.log(`balance   added ${fmt(deficit)}, now ${fmt(target)}`)
+}
+
 async function ensureRelayerGas() {
   if (!relayerAccount) throw new Error('RELAYER_PRIVATE_KEY is not set — agents hold no gas, so every spend is relayed.')
   const balance = await publicClient.getBalance({ address: relayerAccount.address })
@@ -273,11 +287,10 @@ async function summary(hired: Hired[]) {
     const info = await contract.getAgent(agent.address)
     console.log(
       `  ${agent.demo.name.padEnd(10)} spent ${fmt(info.periodSpend).padStart(6)} of ${fmt(info.perPeriodCap).padEnd(6)}` +
-        `  earmark left ${fmt(info.earmarkedBalance).padStart(6)}  ${info.active ? 'active' : 'revoked'}`,
+        `  ${info.active ? 'active' : 'revoked'}`,
     )
   }
-  const [earmarked, unallocated] = await Promise.all([contract.getTotalEarmarked(), contract.getUnallocatedTreasury()])
-  console.log(`\ntreasury  earmarked ${fmt(earmarked)}, unallocated ${fmt(unallocated)}`)
+  console.log(`\nbalance   ${fmt(await contract.getBalance())}, shared by every agent`)
   console.log(`explorer  https://testnet.arcscan.app/address/${ROSTER_ADDRESS}`)
 }
 
@@ -304,16 +317,19 @@ async function main() {
 
     const live: Hired[] = []
     for (const agent of hired) {
-      const info = await contract.getAgent(agent.address)
-      if (info.active && info.earmarkedBalance >= usdc(ROUND[agent.demo.name]!.amount)) live.push(agent)
-      else console.log(`  ${agent.demo.name.padEnd(10)} skipped — ${info.active ? 'earmark too low' : 'revoked'}`)
+      if ((await contract.getAgent(agent.address)).active) live.push(agent)
+      else console.log(`  ${agent.demo.name.padEnd(10)} skipped — revoked`)
     }
+    // Enough for this round on top of what is there; the contract refuses a spend the balance
+    // can't cover, so a short balance would fail the round midway.
+    const round = live.reduce((total, a) => total + usdc(ROUND[a.demo.name]!.amount), 0n)
+    await ensureBalance((await contract.getBalance()) > round ? 0n : round)
     await play(new Map(live.map((a) => [a.demo.name, a])), live.map((a) => ({ agent: a.demo.name, ...ROUND[a.demo.name]! })))
     await summary(hired)
     return
   }
 
-  // 1. Hire. Registration first, so the caps are live before a cent is earmarked.
+  // 1. Hire. That is the whole setup per agent: caps on-chain, spending from the shared balance.
   // Sequential: every hire is signed by the one owner account, and concurrent sends race for the
   // same nonce ("replacement transaction underpriced").
   console.log('hiring')
@@ -324,41 +340,14 @@ async function main() {
   }
   if (hired.every((h) => !h.fresh)) console.log('  everyone is already on the roster')
 
-  // "Never funded and never spent" rather than "hired this run", so a run that died between
-  // hiring and earmarking picks up where it stopped instead of leaving an agent with no budget.
   const before = new Map<Address, contract.AgentInfo>()
   for (const h of hired) before.set(h.address, await contract.getAgent(h.address))
-  const fresh = hired.filter((h) => before.get(h.address)!.earmarkedBalance === 0n && before.get(h.address)!.periodSpend === 0n)
 
-  // 2. Deliver USDC to the Roster (§4.6 — Bridge Kit's job, played here by a plain transfer),
-  //    only as much as the new earmarks need beyond what is already unallocated.
-  const needed = fresh.reduce((total, h) => total + h.demo.earmark, 0n)
-  if (needed > 0n) {
-    const unallocated = await contract.getUnallocatedTreasury()
-    const deficit = needed + TREASURY_HEADROOM - unallocated
-    if (deficit > 0n) {
-      const wallet = await publicClient.readContract({
-        address: env.USDC_ADDRESS,
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [ownerAccount.address],
-      })
-      if (wallet < deficit + RELAYER_GAS) {
-        throw new Error(`The owner holds ${fmt(wallet)} but seeding needs ${fmt(deficit + RELAYER_GAS)}. Top up from the Arc faucet.`)
-      }
-      await transferUsdc(ROSTER_ADDRESS, deficit, 'treasury deposit')
-      console.log(`\ntreasury  deposited ${fmt(deficit)}`)
-    }
-  }
+  // 2. Add money (§4.6 — Bridge Kit's job, played here by a plain transfer from the owner).
+  console.log('')
+  await ensureBalance(TREASURY_TARGET)
 
-  // 3. Earmark each new agent's opening budget. Moves no tokens — the USDC is already there.
-  if (fresh.length > 0) console.log('\nearmarking')
-  for (const agent of fresh) {
-    await contract.fundAgent(agent.address, agent.demo.earmark)
-    console.log(`  ${agent.demo.name.padEnd(10)} ${fmt(agent.demo.earmark)}`)
-  }
-
-  // 4. Gas for the relayer — never for an agent — then the morning, only against a roster that
+  // 3. Gas for the relayer — never for an agent — then the morning, only against a roster that
   //    has not already had one.
   await ensureRelayerGas()
 

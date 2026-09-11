@@ -19,7 +19,7 @@ export interface Hire {
   role: string
   status: HireStatus
   failedAt?: HireStatus
-  /** Whether its caps reached the chain. Decides what a failure message has to say. */
+  /** Whether its limits reached the chain. Decides what a failure message has to say. */
   registered: boolean
   error?: string
   /** The agent's Claude session, to watch it set itself up. */
@@ -34,14 +34,14 @@ export function hireProgress(hire: Hire): string {
     case 'setting-up':
       return 'Setting up its wallet. This usually takes a minute or two.'
     case 'registering':
-      return 'Registering its caps on-chain…'
+      return 'Setting its spending limits on-chain…'
     case 'briefing':
       return 'Handing it the roster details…'
     case 'active':
       return 'On the roster.'
     case 'failed':
       return `${hire.error ?? 'Something went wrong.'} ${
-        hire.registered ? 'It is registered on-chain, with its caps enforced.' : 'Nothing was registered on-chain.'
+        hire.registered ? 'It is on the roster, with its limits enforced.' : 'Nothing was registered on-chain.'
       }`
   }
 }
@@ -53,16 +53,36 @@ export interface Agent {
   name: string
   role: string
   category: Category
+  /** Per-purchase limit. Anything over it waits for the owner. */
   perTxCap: bigint
+  /** Monthly limit. */
   perPeriodCap: bigint
   /** The period the contract will enforce right now — `getAgent` applies the lazy reset. */
   periodSpend: bigint
-  earmarkedBalance: bigint
   status: AgentStatus
   /** Relative, rendered on the server: `6 minutes ago`. */
   lastActivity: string
   /** Sparkline series, oldest first. Unitless — shape only. */
   trend: number[]
+}
+
+/** The roster's one balance — a company account behind every agent's expense card. Agents spend
+ *  from it within their own limits; no part of it is set aside for any one agent. */
+export interface Treasury {
+  balance: bigint
+  /** What the owner's own wallet holds, i.e. what "Add money" can move in. */
+  ownerBalance: bigint
+}
+
+/** What active agents could still spend this month without asking, each floored at zero: an
+ *  approval can carry an agent past its limit, and that overshoot is not negative room for the
+ *  others. When this exceeds the balance, the balance — not the limits — is what will stop them. */
+export function roomThisMonth(agents: Agent[]): bigint {
+  return sum(
+    agents
+      .filter((a) => a.status !== 'revoked')
+      .map((a) => (a.perPeriodCap > a.periodSpend ? a.perPeriodCap - a.periodSpend : 0n)),
+  )
 }
 
 export interface PendingRequest {
@@ -115,10 +135,10 @@ export function splitMemo(memo: string): { payee?: string; detail: string } {
   return { payee: memo.slice(0, at), detail: memo.slice(at + 3) }
 }
 
-/** Why a request is held. Either cap can do it, and the copy has to name the right one. */
+/** Why a request is held. Either limit can do it, and the copy has to name the right one. */
 export function heldBecause(r: Pick<PendingRequest, 'amount' | 'perTxCap' | 'periodSpend' | 'perPeriodCap'>): string {
-  if (r.amount > r.perTxCap) return `${usd(r.amount - r.perTxCap)} above its ${usd(r.perTxCap)} per-transaction limit.`
-  return `It would take this period's spend to ${usd(r.periodSpend + r.amount)}, past its ${usdWhole(r.perPeriodCap)} monthly cap.`
+  if (r.amount > r.perTxCap) return `${usd(r.amount - r.perTxCap)} above its ${usd(r.perTxCap)} per-purchase limit.`
+  return `It would take this month's spend to ${usd(r.periodSpend + r.amount)}, past its ${usdWhole(r.perPeriodCap)} monthly limit.`
 }
 
 /** Day-grouped, newest day first, newest payment first within a day. */

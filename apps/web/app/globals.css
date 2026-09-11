@@ -113,6 +113,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   line-height: 1.05;
 }
 .hero-note { font-size: 15px; color: var(--text-dim); }
+.hero-actions { margin-top: 16px; }
 
 .stats { display: flex; gap: 44px; padding-bottom: 6px; }
 .stat { display: flex; flex-direction: column; gap: 9px; }
@@ -134,6 +135,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .banner-body { flex: 1; min-width: 0; }
 .banner-title { font-size: 14.5px; font-weight: 600; }
 .banner-sub { font-size: 13px; color: var(--text-dim); margin-top: 5px; }
+/* The balance, not a limit, is what will stop the agents. Amber: worth acting on, nothing broken. */
+.banner[data-state='warning'] { border-color: #8a6d2f; }
+.banner[data-state='warning'] .banner-icon { color: #d4a84f; }
 
 /* ─── agent table ────────────────────────────────────────────────────────── */
 
@@ -161,6 +165,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .spend-cap { font-size: 12.5px; color: var(--text-faint); }
 .bar { height: 4px; border-radius: 2px; background: var(--line-strong); margin-top: 10px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.spend-limit { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
 
 .overflow {
   background: none;
@@ -293,6 +298,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 22px 24px 20px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
 }
+.modal-narrow { max-width: 420px; }
+.modal-narrow > .field { margin-top: 20px; }
 .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .modal-title { font-size: 19px; font-weight: 600; }
 .modal-sub { font-size: 13px; color: var(--text-dim); margin-top: 7px; line-height: 1.5; }
@@ -369,7 +376,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 @media (max-width: 900px) {
   /* Fixed status column: `auto` would size to the widest pill and shove the
-     budget bars out of alignment on whichever row happens to need review. */
+     spend bars out of alignment on whichever row happens to need review. */
   .trow { grid-template-columns: 1.4fr 1.7fr 112px; }
   .trow > .col-category,
   .trow > .col-activity,

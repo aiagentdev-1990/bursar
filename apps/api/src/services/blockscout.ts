@@ -21,7 +21,7 @@ const env = loadEnv()
 
 export type RosterEventName =
   | 'AgentRegistered'
-  | 'AllowanceFunded'
+  | 'TreasuryWithdrawn'
   | 'SpendExecuted'
   | 'PaymentPending'
   | 'PendingApproved'

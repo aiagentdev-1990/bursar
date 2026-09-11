@@ -1,19 +1,20 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getAddress, isAddress, type Address } from 'viem'
 import { loadEnv } from '../env.js'
 import { store } from './store.js'
 
 /// Claude Managed Agents (§4.1). The SDK sets the `managed-agents-2026-04-01` beta header on
 /// every `client.beta.{agents,environments,sessions}.*` call, so it is not set by hand here.
 ///
-/// The four resources and why they are separate:
-///   Agent       — behaviour (model, system prompt, tools). Versioned and reusable: one per
-///                 *role*, created once and referenced by id forever after. Creating one per
-///                 hire would orphan configs and pay the create latency for nothing.
+/// The resources and why they are separate:
+///   Agent       — behaviour: model, system prompt, tools, and the payment skill. One per hire,
+///                 created before its session, so each carries its own name and role and stays
+///                 pinned to the skill version it was hired with.
 ///   Environment — the sandbox. One is enough for the whole roster.
-///   Session     — one running instance, tied to one hire: one wallet, one allowance.
-///   Vault       — credentials. Checkpoint 5, once the payment tool exists.
+///   Session     — one running instance of that agent: one wallet, one allowance.
 ///
-/// Creating a session does not start work; a user event does. Both §4.1 and §4.3 depend on that.
+/// The agent's wallet is created by its skill, inside its own sandbox. This service never sees
+/// the key — only the address the agent reports, which is what gets hired on-chain.
 
 const MODEL = 'claude-opus-5'
 
@@ -29,41 +30,34 @@ function anthropic(): Anthropic {
 
 export class AgentRuntimeUnavailable extends Error {}
 
-function systemPromptFor(role: string): string {
+function systemPromptFor(name: string, role: string): string {
   return [
-    `You are a hired agent on a business owner's roster. Your role: ${role}.`,
+    `You are ${name}, a hired agent on a business owner's roster. Your role: ${role}.`,
     '',
-    'You hold a spending allowance enforced by an on-chain contract. Your roster-payments skill',
-    'explains how to spend it — follow it. If a payment exceeds your allowance the contract holds',
-    'it for the owner to approve; that is expected, not an error. Say what you were trying to buy',
-    'and why, then continue with anything that does not depend on it.',
+    'You hold a spending allowance enforced by an on-chain contract. Your payment skill explains',
+    'how to set up and how to spend it — follow it. If a payment exceeds your allowance the',
+    'contract holds it for the owner to approve; that is expected, not an error. Say what you were',
+    'trying to buy and why, then continue with anything that does not depend on it.',
     '',
     'Never attempt to work around a spending limit.',
   ].join('\n')
 }
 
-/// One Agent config per role, created once and cached.
-///
-/// The cache key includes the skill id: changing which skill an agent gets is a behaviour change,
-/// and a config cached under the bare role name would silently keep serving the old one.
-async function agentConfigForRole(role: string): Promise<{ id: string; version: number }> {
+/// A new Agent for this hire, with the payment skill attached. Created before the session, which
+/// has to reference it. Pinned to the configured skill version, so a later upload cannot change
+/// how an agent already on the roster pays.
+async function createAgent(params: { name: string; role: string }): Promise<{ id: string; version: number }> {
   const { CLAUDE_PAYMENT_SKILL_ID: skillId, CLAUDE_PAYMENT_SKILL_VERSION: skillVersion } = loadEnv()
-  const cacheKey = `${role}::${skillId}@${skillVersion}`
-
-  const cached = store.getAgentConfig(cacheKey)
-  if (cached) return cached
 
   const agent = await anthropic().beta.agents.create({
-    name: `Roster · ${role}`,
+    name: `Roster · ${params.name}`,
     model: MODEL,
-    system: systemPromptFor(role),
+    system: systemPromptFor(params.name, params.role),
     tools: [{ type: 'agent_toolset_20260401', default_config: { enabled: true } }],
     skills: [{ type: 'custom', skill_id: skillId, version: skillVersion }],
   })
 
-  const config = { id: agent.id, version: agent.version }
-  store.setAgentConfig(cacheKey, config)
-  return config
+  return { id: agent.id, version: agent.version }
 }
 
 async function environmentId(): Promise<string> {
@@ -109,39 +103,20 @@ export interface StartedSession {
   traceUrl: string
 }
 
-/// Provisions and starts one agent: Agent config (per role, cached) → Session → the user event
-/// that actually sets it working. Creating a session only provisions it.
+/// Creates a new Agent for this hire, then a session on it that opens with `briefing`. Passing it
+/// as `initial_events` collapses create + first message: the session starts already running.
 export async function startAgentSession(params: {
-  key: string
   name: string
   role: string
-  briefing?: string
+  briefing: string
 }): Promise<StartedSession> {
-  const agent = await agentConfigForRole(params.role)
+  const agent = await createAgent(params)
 
   const session = await anthropic().beta.sessions.create({
     agent: { type: 'agent', id: agent.id, version: agent.version },
     environment_id: await environmentId(),
     title: `${params.name} · ${params.role}`,
-  })
-
-  store.setSession(params.key, session.id)
-
-  await anthropic().beta.sessions.events.send(session.id, {
-    events: [
-      {
-        type: 'user.message',
-        content: [
-          {
-            type: 'text',
-            text:
-              params.briefing ??
-              `You have been hired as ${params.name}. Your role: ${params.role}. Introduce yourself ` +
-                `in one line, then say what you plan to do first.`,
-          },
-        ],
-      },
-    ],
+    initial_events: [{ type: 'user.message', content: [{ type: 'text', text: params.briefing }] }],
   })
 
   return {
@@ -149,6 +124,66 @@ export async function startAgentSession(params: {
     sessionId: session.id,
     traceUrl: `https://platform.claude.com/workspaces/default/sessions/${session.id}`,
   }
+}
+
+export async function sendMessage(sessionId: string, text: string): Promise<void> {
+  await anthropic().beta.sessions.events.send(sessionId, {
+    events: [{ type: 'user.message', content: [{ type: 'text', text }] }],
+  })
+}
+
+// ─── the wallet the agent's skill creates ───────────────────────────────────
+
+export class AgentSetupFailed extends Error {}
+
+const WALLET_LINE = /WALLET_ADDRESS:\s*(0x[0-9a-fA-F]{40})\b/g
+
+/// The address from the agent's `WALLET_ADDRESS: 0x…` line, checksummed. Strict on purpose: this
+/// is the address that gets an allowance, so an ambiguous or malformed one fails here — before
+/// anything is registered — rather than on-chain.
+export function parseWalletAddress(text: string): Address {
+  const found = [...text.matchAll(WALLET_LINE)].map((match) => {
+    // `isAddress` is strict by default: a mixed-case address must carry a valid EIP-55 checksum.
+    // That catches an agent retyping its address with a typo — `getAddress` alone would just
+    // re-checksum the typo and fund the wrong wallet.
+    if (!isAddress(match[1]!)) throw new AgentSetupFailed(`the agent reported an invalid address (${match[1]})`)
+    return getAddress(match[1]!)
+  })
+  if (found.length === 0) throw new AgentSetupFailed('no WALLET_ADDRESS line in the agent’s reply')
+  if (new Set(found).size > 1) throw new AgentSetupFailed('the agent reported more than one wallet address')
+  return found[0]!
+}
+
+const textOf = (content: Array<{ type: string }> | undefined): string =>
+  (content ?? [])
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+
+/// Waits for the agent to run its skill's setup and report its wallet. Setup installs packages
+/// in the sandbox, so this takes a minute or two.
+export async function waitForWalletAddress(sessionId: string, timeoutMs = 240_000): Promise<Address> {
+  const client = anthropic()
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    let replied = false
+    for await (const event of client.beta.sessions.events.list(sessionId)) {
+      if (event.type !== 'agent.message') continue
+      replied = true
+      const text = textOf(event.content)
+      if (text.match(WALLET_LINE)) return parseWalletAddress(text)
+    }
+
+    const { status } = await client.beta.sessions.retrieve(sessionId)
+    if (status === 'terminated') throw new AgentSetupFailed('the session ended before the agent reported a wallet')
+    // Idle after replying means its turn is over — it will not report an address on its own.
+    if (status === 'idle' && replied) throw new AgentSetupFailed('the agent finished its setup turn without reporting a wallet')
+
+    await new Promise((resolve) => setTimeout(resolve, 3_000))
+  }
+
+  throw new AgentSetupFailed(`the agent did not report a wallet within ${timeoutMs / 1000}s`)
 }
 
 /// Asks the agent to generate its own P-256 authorization keypair and report the public half.

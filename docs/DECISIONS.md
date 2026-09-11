@@ -2,6 +2,24 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-11 — Hiring: a new agent per hire, and the agent makes its own wallet
+`POST /agents` now runs in this order: create a Managed Agents **Agent** for this hire with the
+x402-arc skill attached (pinned to a version), start a session on it, let the skill's setup create
+the wallet inside the agent's sandbox, hire the address it reports on-chain, then tell it the
+Roster address, relay URL and caps.
+
+- **One Agent per hire, not one per role.** Each carries its own name and role in its system
+  prompt, and stays pinned to the skill version it was hired with, so a later upload cannot change
+  how an agent already on the roster pays. Supersedes the cached per-role config.
+- **The backend never generates or sees the agent's key.** It only learns the address, parsed
+  strictly from the agent's `WALLET_ADDRESS:` line (a mixed-case address must carry a valid
+  checksum, so a retyped typo fails instead of funding the wrong wallet).
+- **Nothing is registered until the agent reports a wallet.** If setup fails, the hire fails with
+  no on-chain state — better than an allowance attached to a wallet nobody holds.
+- Without a Claude runtime (dev, the integration tests), the hire falls back to a local dev
+  wallet and says so, so the on-chain half stays testable.
+- The hire is synchronous and takes a minute or two while the agent sets up.
+
 ## 2026-09-11 — Agents hold no gas: `executeSpendFor`, a relayed spend
 Gas on Arc is USDC — the same balance agents pay sellers with. An agent sending its own
 `executeSpend` needs a float, and the float breaks three things:

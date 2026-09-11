@@ -54,7 +54,7 @@ function config() {
   return { url, token }
 }
 
-export async function api<T>(path: string, init: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<T> {
+export async function api<T>(path: string, init: { method?: 'GET' | 'POST' | 'DELETE'; body?: unknown } = {}): Promise<T> {
   const { url, token } = config()
 
   let response: Response

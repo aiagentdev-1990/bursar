@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { AgentTable } from '@/components/AgentTable'
+import { AutoRefresh } from '@/components/AutoRefresh'
+import { Onboarding } from '@/components/Onboarding'
 import { Stat, StatRow } from '@/components/Stat'
 import { Unavailable } from '@/components/Unavailable'
 import { InfoIcon, ArrowRight } from '@/components/Icons'
@@ -58,7 +60,7 @@ export default async function RosterOverview() {
     )
   }
 
-  const { agents, pending } = result.value
+  const { agents, pending, hires } = result.value
   const spend = sum(agents.map((a) => a.periodSpend))
   const committed = sum(agents.map((a) => a.perPeriodCap))
   // Per agent, floored at zero: an approval can legitimately carry an agent past its cap, and
@@ -84,7 +86,10 @@ export default async function RosterOverview() {
       </div>
 
       <PendingBanner agents={agents} pending={pending} />
+      <Onboarding hires={hires} />
       <AgentTable agents={agents} />
+      {/* Only while something is still moving — a failed hire waits for the owner, not a timer. */}
+      <AutoRefresh active={hires.some((h) => h.status !== 'failed')} />
     </>
   )
 }

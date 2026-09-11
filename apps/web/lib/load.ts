@@ -17,6 +17,8 @@ import {
   splitMemo,
   type Agent,
   type AgentStatus,
+  type Hire,
+  type HireStatus,
   type Payment,
   type PaymentStatus,
   type PendingRequest,
@@ -62,21 +64,35 @@ interface ActivityWire {
   transactionHash: string
 }
 
+interface HireWire {
+  id: string
+  name: string
+  role: string
+  status: HireStatus
+  failedAt?: HireStatus
+  registered: boolean
+  error?: string
+  traceUrl?: string
+}
+
 // ─── loading ─────────────────────────────────────────────────────────────────
 
 export interface RosterData {
   agents: Agent[]
   pending: PendingRequest[]
   payments: Payment[]
+  /** Hires still in flight, and failures not yet dismissed. Finished hires are in `agents`. */
+  hires: Hire[]
   /** Local `YYYY-MM-DD` on the server, for day headings. */
   today: string
 }
 
 export async function loadRoster(now = new Date()): Promise<RosterData> {
-  const [agentsBody, pendingBody, activityBody] = await Promise.all([
+  const [agentsBody, pendingBody, activityBody, hires] = await Promise.all([
     api<{ agents: AgentWire[] }>('/agents'),
     api<{ pending: PendingWire[] }>('/pending'),
     api<{ activity: ActivityWire[] }>('/activity'),
+    loadHires(),
   ])
 
   const roles = new Map(agentsBody.agents.map((a) => [a.id, a.role]))
@@ -86,7 +102,30 @@ export async function loadRoster(now = new Date()): Promise<RosterData> {
     agents: agentsBody.agents.map((a) => toAgent(a, payments, now)),
     pending: pendingBody.pending.map((p) => toPending(p, now)),
     payments,
+    hires,
     today: dayKey(now),
+  }
+}
+
+async function loadHires(): Promise<Hire[]> {
+  try {
+    const body = await api<{ hires: HireWire[] }>('/agents/hires')
+    return body.hires
+      .filter((h) => h.status !== 'active')
+      .map(({ id, name, role, status, failedAt, registered, error, traceUrl }) => ({
+        id,
+        name,
+        role,
+        status,
+        failedAt,
+        registered,
+        error,
+        traceUrl,
+      }))
+  } catch (error) {
+    // An API from before background hires answers 404 here. The roster still renders without them.
+    if (error instanceof ApiRequestError && error.status === 404) return []
+    throw error
   }
 }
 

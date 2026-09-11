@@ -405,3 +405,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+/* ─── hires in flight ────────────────────────────────────────────────────── */
+
+.onboarding { display: flex; flex-direction: column; gap: 12px; margin-top: 28px; }
+.onboarding .banner { margin-top: 0; }
+.onboarding .banner[data-state='working'] .banner-icon { color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.onboarding .banner[data-state='failed'] { border-color: #b4545a; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .onboarding .banner-icon { animation: none; } }
+
+.field-wide { grid-column: 1 / -1; }
+.field-hint { color: var(--text-faint); }
+.modal-error {
+  margin-top: 16px;
+  padding: 11px 14px;
+  border: 1px solid #b4545a;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}

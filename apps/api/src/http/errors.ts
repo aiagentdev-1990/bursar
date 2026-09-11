@@ -33,6 +33,12 @@ const CONTRACT_ERRORS: Record<string, { status: 400 | 403 | 404 | 409; message: 
   ZeroCap: { status: 400, message: 'Both caps must be greater than zero.' },
   ZeroAddress: { status: 400, message: 'A zero address was supplied.' },
   AlreadyInitialized: { status: 409, message: 'That roster is already initialized.' },
+  // executeSpendFor — the relayed path. The agent re-signs; nothing on the roster is wrong.
+  SignatureExpired: { status: 400, message: "The agent's signed spend request has expired." },
+  InvalidSignature: {
+    status: 400,
+    message: "The spend request isn't validly signed by that agent for this roster, or was already used.",
+  },
 }
 
 /// viem buries the decoded custom error a few layers down a revert.

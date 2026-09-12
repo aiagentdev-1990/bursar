@@ -25,6 +25,23 @@ export function usd(base: bigint): string {
 }
 
 /**
+ * Transaction amounts in the activity log, where rounding to cents is lossy: agents pay for
+ * single API calls, and `usd` renders a $0.006 crawl as "$0.01" and a $0.0004 call as "$0.00" —
+ * a payment that reads as nothing at all.
+ *
+ * Always at least two decimals so the column still scans as money, then as many more as the
+ * amount actually carries, up to USDC's six. Trailing zeros past the second are dropped, so
+ * whole cents are unchanged: `$1.20`, `$0.006`, `$0.000432`.
+ */
+export function usdExact(base: bigint): string {
+  const neg = base < 0n
+  const abs = neg ? -base : base
+  const frac = (abs % SCALE).toString().padStart(USDC_DECIMALS, '0')
+  const shown = frac.replace(/0+$/, '').padEnd(2, '0')
+  return `${neg ? '-' : ''}$${group(abs / SCALE)}.${shown}`
+}
+
+/**
  * Secondary position only — round limit figures that the mockups render bare: `of $400`,
  * `up to $50 per purchase`. Never use this for a transaction amount.
  *

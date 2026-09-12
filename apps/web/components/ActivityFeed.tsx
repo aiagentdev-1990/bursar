@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Stat, StatRow } from './Stat'
 import { PaymentStatusPill } from './StatusPill'
-import { usd } from '@/lib/money'
+import { usdExact } from '@/lib/money'
 import { dayHeading, paymentsByDay, sum, type Payment } from '@/lib/roster'
 
 const ALL = 'all'
@@ -42,7 +42,7 @@ export function ActivityFeed({
         <div>
           <span className="eyebrow">Activity · {period}</span>
           <div className="hero-line">
-            <span className="hero">{usd(settledTotal)}</span>
+            <span className="hero">{usdExact(settledTotal)}</span>
             <span className="hero-note">
               settled across {settled.length} {settled.length === 1 ? 'transaction' : 'transactions'}
             </span>
@@ -50,9 +50,9 @@ export function ActivityFeed({
         </div>
 
         <StatRow>
-          <Stat label="Held for approval">{usd(held)}</Stat>
-          <Stat label="Rejected">{usd(rejected)}</Stat>
-          <Stat label="Largest payment">{usd(largest)}</Stat>
+          <Stat label="Held for approval">{usdExact(held)}</Stat>
+          <Stat label="Rejected">{usdExact(rejected)}</Stat>
+          <Stat label="Largest payment">{usdExact(largest)}</Stat>
         </StatRow>
       </div>
 
@@ -84,7 +84,7 @@ export function ActivityFeed({
         <section className="daygroup" key={group.day}>
           <div className="dayhead">
             <span className="eyebrow">{dayHeading(group.day, today)}</span>
-            <span className="day-settled">{usd(group.settled)} settled</span>
+            <span className="day-settled">{usdExact(group.settled)} settled</span>
           </div>
           {group.items.map((payment) => (
             <PaymentRow key={payment.id} payment={payment} />
@@ -105,7 +105,7 @@ function PaymentRow({ payment }: { payment: Payment }) {
         <div className="prow-memo">{payment.memo}</div>
       </div>
       <span className="cell-dim col-category">{payment.category}</span>
-      <span className="prow-amount">{usd(payment.amount)}</span>
+      <span className="prow-amount">{usdExact(payment.amount)}</span>
       <span className="prow-status col-status">
         <PaymentStatusPill status={payment.status} />
       </span>

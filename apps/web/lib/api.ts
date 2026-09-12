@@ -50,7 +50,7 @@ function config() {
   const port = fromRootEnv('PORT') ?? '8787'
   const url = (process.env.ROSTER_API_URL ?? fromRootEnv('ROSTER_API_URL') ?? `http://localhost:${port}`).replace(/\/$/, '')
   const token = process.env.OWNER_API_TOKEN ?? fromRootEnv('OWNER_API_TOKEN')
-  if (!token) throw new ApiUnavailable('OWNER_API_TOKEN is not set, so the dashboard cannot authenticate to the Roster API.')
+  if (!token) throw new ApiUnavailable('OWNER_API_TOKEN is not set, so the dashboard cannot authenticate to the Bursar API.')
   return { url, token }
 }
 
@@ -69,7 +69,7 @@ export async function api<T>(path: string, init: { method?: 'GET' | 'POST' | 'DE
       cache: 'no-store',
     })
   } catch {
-    throw new ApiUnavailable(`Could not reach the Roster API at ${url}. Is \`pnpm api:dev\` running?`)
+    throw new ApiUnavailable(`Could not reach the Bursar API at ${url}. Is \`pnpm api:dev\` running?`)
   }
 
   const body = (await response.json().catch(() => ({}))) as { error?: { code?: string; message?: string } }
@@ -77,7 +77,7 @@ export async function api<T>(path: string, init: { method?: 'GET' | 'POST' | 'DE
     throw new ApiRequestError(
       response.status,
       body.error?.code ?? 'error',
-      body.error?.message ?? `The Roster API returned ${response.status}.`,
+      body.error?.message ?? `The Bursar API returned ${response.status}.`,
     )
   }
   return body as T

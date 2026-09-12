@@ -2,6 +2,21 @@
 
 Settled questions, so they don't get relitigated. Newest first. Add the date and the reason.
 
+## 2026-09-12 — A fired agent drops off the roster
+The dashboard showed revoked agents as a row with a `Revoked` pill, and counted them in `AGENTS`.
+Two problems: the roster is meant to answer "who works for me now", and a revoked agent's unused
+monthly limit was still counted in the limits-versus-balance warning — one dead agent with a $400
+limit made that banner read "$407.26 more this month" against a $4.26 balance.
+
+`apps/web/app/page.tsx` now derives `team = agents.filter(a => a.status !== 'revoked')` and uses it
+for the table, the agent count, the pending banner and the low-balance check. Spend totals still
+run over *all* agents, revoked included: the money left the balance, and hiding it would be a
+second set of books.
+
+Consequence for the demo: firing an agent on camera removes its row rather than restyling it. The
+proof that the others are unaffected is that their rows keep spending, which is the stronger shot
+anyway.
+
 ## 2026-09-11 — One shared balance: `fundAgent` is gone
 The per-agent earmark made the owner do the same job twice: set an agent's caps, then fund it
 separately — and a freshly hired agent with caps but no earmark looked broken. The dashboard had

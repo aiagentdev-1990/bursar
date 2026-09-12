@@ -3,7 +3,7 @@
 // which would round a USDC amount), and they become bigints here, at the edge.
 //
 // Where each figure comes from (§4.5): caps, period spend and active status are the contract's
-// own `getAgent`; the balance is the Roster's USDC balance; membership, history and the
+// own `getAgent`; the balance is the Bursar contract's USDC balance; membership, history and the
 // open-request set are the event log via Blockscout. Nothing here recomputes cap or period arithmetic — a second implementation of it
 // is the thing that could disagree with the contract.
 

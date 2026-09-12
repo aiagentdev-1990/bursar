@@ -84,7 +84,7 @@ const schema = z.object({
   CLAUDE_PAYMENT_SKILL_ID: z.string().default('skill_013WeX2fhy136aaFkUFH4BuW'),
   /// Pinned so a re-upload cannot change agent behaviour underneath a running demo — this is the
   /// relayed-spend version uploaded 2026-09-11. Set to "latest" to track edits instead.
-  CLAUDE_PAYMENT_SKILL_VERSION: z.string().default('skver_01FdfPSYGGAjZZjPuAcSKfT6'),
+  CLAUDE_PAYMENT_SKILL_VERSION: z.string().default('skver_01Fs3YouM9n24nQARkhPEwLK'),
 
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 

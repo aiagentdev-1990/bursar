@@ -63,10 +63,10 @@ interface DemoAgent {
 }
 
 const AGENTS: DemoAgent[] = [
-  { name: 'Pricer', role: 'Comparable-listing research', perTxCap: usdc('0.25'), perPeriodCap: usdc('3') },
-  { name: 'Concierge', role: 'Buyer questions and offers', perTxCap: usdc('0.20'), perPeriodCap: usdc('1.50') },
-  { name: 'Runner', role: 'One-off task payouts', perTxCap: usdc('0.75'), perPeriodCap: usdc('4') },
-  { name: 'Scout', role: 'Auction and estate sourcing', perTxCap: usdc('0.50'), perPeriodCap: usdc('2.50') },
+  { name: 'Pricer', role: 'Market and comparable data', perTxCap: usdc('0.25'), perPeriodCap: usdc('3') },
+  { name: 'Concierge', role: 'Customer questions', perTxCap: usdc('0.20'), perPeriodCap: usdc('1.50') },
+  { name: 'Runner', role: 'One-off human work', perTxCap: usdc('0.75'), perPeriodCap: usdc('4') },
+  { name: 'Scout', role: 'Sourcing and monitoring', perTxCap: usdc('0.50'), perPeriodCap: usdc('2.50') },
   { name: 'Ledger', role: 'Bookkeeping and reconciliation', perTxCap: usdc('0.40'), perPeriodCap: usdc('2') },
 ]
 
@@ -97,36 +97,36 @@ interface Spend {
 }
 
 const MORNING: Spend[] = [
-  { agent: 'Runner', amount: '2.10', payee: 'Halden Courier', note: 'Insured overnight transit', owner: 'reject' },
-  { agent: 'Pricer', amount: '0.17', payee: 'Brave Search', note: 'Reference-number price check' },
-  { agent: 'Scout', amount: '0.38', payee: 'Invaluable', note: 'Estate lot watchlist, 12 lots' },
+  { agent: 'Runner', amount: '2.10', payee: 'Upwork', note: 'Contractor retainer, monthly', owner: 'reject' },
+  { agent: 'Pricer', amount: '0.17', payee: 'Brave Search', note: 'Source sweep, 40 queries' },
+  { agent: 'Scout', amount: '0.38', payee: 'Firecrawl', note: 'Competitor page crawl, 120 pages' },
   { agent: 'Ledger', amount: '0.38', payee: 'Stripe Tax', note: 'Quarterly filing prep' },
-  { agent: 'Runner', amount: '0.60', payee: 'Bench Watchmaking Co.', note: 'Service quote, Rolex 16610 bracelet' },
-  { agent: 'Concierge', amount: '0.09', payee: 'Groq', note: 'Offer-response drafting' },
-  { agent: 'Pricer', amount: '0.22', payee: 'Exa', note: 'Dealer inventory sweep, 3 sources' },
+  { agent: 'Runner', amount: '0.60', payee: 'Prolific', note: 'Screener survey, 30 participants' },
+  { agent: 'Concierge', amount: '0.09', payee: 'Groq', note: 'Support-reply drafting' },
+  { agent: 'Pricer', amount: '0.22', payee: 'Exa', note: 'Web index pull, 3 sources' },
   { agent: 'Ledger', amount: '0.35', payee: 'Xero', note: 'Monthly reconciliation run' },
-  { agent: 'Scout', amount: '0.80', payee: 'Heritage Auctions', note: "Buyer's-premium deposit, lot 214", owner: 'approve' },
-  { agent: 'Concierge', amount: '0.06', payee: 'Twilio', note: 'Buyer SMS, 240 messages' },
-  { agent: 'Runner', amount: '0.45', payee: 'Halden Courier', note: 'Insured ground transit, Speedmaster' },
+  { agent: 'Scout', amount: '0.80', payee: 'Crunchbase', note: 'Company dataset export', owner: 'approve' },
+  { agent: 'Concierge', amount: '0.06', payee: 'Twilio', note: 'Customer SMS, 240 messages' },
+  { agent: 'Runner', amount: '0.45', payee: 'Prolific', note: 'Follow-up interviews, 6 sessions' },
   // Exactly at Ledger's per-transaction cap — the inclusive boundary, executed not held.
   { agent: 'Ledger', amount: '0.40', payee: 'QuickBooks', note: 'Payroll export' },
-  { agent: 'Pricer', amount: '0.14', payee: 'Chrono24 Data', note: 'Comparable sold-listing pull' },
-  { agent: 'Scout', amount: '0.38', payee: 'Invaluable', note: 'Auction alert feed, weekly' },
-  { agent: 'Concierge', amount: '0.12', payee: 'Twilio', note: 'Buyer follow-up calls' },
-  { agent: 'Runner', amount: '0.70', payee: 'Loupe Freelance', note: 'Strap-fitting task payout' },
+  { agent: 'Pricer', amount: '0.14', payee: 'Crunchbase', note: 'Funding-round comparables' },
+  { agent: 'Scout', amount: '0.38', payee: 'Firecrawl', note: 'Change-monitor feed, weekly' },
+  { agent: 'Concierge', amount: '0.12', payee: 'Twilio', note: 'Customer follow-up calls' },
+  { agent: 'Runner', amount: '0.70', payee: 'Upwork', note: 'Transcript clean-up, one-off' },
   { agent: 'Ledger', amount: '0.30', payee: 'Stripe Tax', note: 'Sales-tax remittance prep' },
-  { agent: 'Pricer', amount: '0.19', payee: 'Brave Search', note: 'Reference-number price check' },
-  // The demo's held request (PRD §7 beat 4): over Runner's $0.75 per-transaction limit, left
-  // open for the owner to approve on stage.
-  { agent: 'Runner', amount: '1.20', payee: 'Verity Watch Authentication', note: 'Pre-purchase authentication, Omega ref. 145.022' },
+  { agent: 'Pricer', amount: '0.19', payee: 'Brave Search', note: 'Source sweep, 40 queries' },
+  // The demo's held request: over Runner's per-transaction limit, left open for the owner to
+  // approve on stage. The video calls this "a hundred and twenty bucks to hire a human".
+  { agent: 'Runner', amount: '1.20', payee: 'Surge AI', note: 'Expert annotation batch, 400 items' },
 ]
 
 /// `seed activity` rotates through these. All comfortably inside every agent's per-tx cap.
 const ROUND: Record<string, Omit<Spend, 'agent'>> = {
-  Pricer: { amount: '0.12', payee: 'Brave Search', note: 'Reference-number price check' },
-  Concierge: { amount: '0.05', payee: 'Twilio', note: 'Buyer SMS, 180 messages' },
-  Runner: { amount: '0.40', payee: 'Halden Courier', note: 'Local courier, same-day' },
-  Scout: { amount: '0.25', payee: 'Invaluable', note: 'Auction alert feed, daily' },
+  Pricer: { amount: '0.12', payee: 'Brave Search', note: 'Source sweep, 25 queries' },
+  Concierge: { amount: '0.05', payee: 'Twilio', note: 'Customer SMS, 180 messages' },
+  Runner: { amount: '0.40', payee: 'Prolific', note: 'Micro-task batch, same-day' },
+  Scout: { amount: '0.25', payee: 'Firecrawl', note: 'Change-monitor feed, daily' },
   Ledger: { amount: '0.15', payee: 'Xero', note: 'Daily bank-feed sync' },
 }
 

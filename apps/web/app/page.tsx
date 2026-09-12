@@ -87,6 +87,12 @@ export default async function RosterOverview() {
   }
 
   const { agents, pending, hires, treasury } = result.value
+
+  // The roster is the team you have now, so a fired agent drops off it. Its spend still counts
+  // toward the month — the money left the balance and saying otherwise would be a second set of
+  // books — but it holds no limit any more, so it is out of every forward-looking figure:
+  // the agent count, the limits-versus-balance check, and the table.
+  const team = agents.filter((a) => a.status !== 'revoked')
   const spent = sum(agents.map((a) => a.periodSpend))
 
   return (
@@ -106,16 +112,16 @@ export default async function RosterOverview() {
         </div>
 
         <StatRow>
-          <Stat label="Agents">{agents.length}</Stat>
+          <Stat label="Agents">{team.length}</Stat>
           <Stat label={`Spent in ${label}`}>{usd(spent)}</Stat>
           <Stat label="Awaiting approval">{usd(sum(pending.map((r) => r.amount)))}</Stat>
         </StatRow>
       </div>
 
-      <PendingBanner agents={agents} pending={pending} />
-      <LowBalanceBanner agents={agents} treasury={treasury} />
+      <PendingBanner agents={team} pending={pending} />
+      <LowBalanceBanner agents={team} treasury={treasury} />
       <Onboarding hires={hires} />
-      <AgentTable agents={agents} />
+      <AgentTable agents={team} />
       {/* Only while something is still moving — a failed hire waits for the owner, not a timer. */}
       <AutoRefresh active={hires.some((h) => h.status !== 'failed')} />
     </>

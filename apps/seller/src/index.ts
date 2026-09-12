@@ -82,26 +82,74 @@ interface Service {
 const SERVICES: Service[] = [
   {
     method: 'GET',
-    path: '/v1/comps',
+    path: '/v1/pricing-watch',
     price: '10000',
-    name: 'Watch comparable sales',
-    description: 'Recent sold listings for a watch reference. Query: ?ref=145.022',
+    name: 'Competitor pricing watch',
+    description:
+      'Crawl a competitor pricing page and diff it against the last snapshot. Query: ?domain=perigee.dev',
+    handler: (req) => {
+      const domain = String(req.query.domain ?? 'perigee.dev')
+      return {
+        domain,
+        crawledAt: new Date().toISOString(),
+        previousCrawl: '2026-09-05T09:14:00.000Z',
+        plans: [
+          { name: 'Starter', monthlyUsd: 0, seats: 1, note: 'free tier' },
+          { name: 'Team', monthlyUsd: 49, seats: 5 },
+          { name: 'Business', monthlyUsd: 199, seats: 25 },
+          { name: 'Enterprise', monthlyUsd: null, seats: null, note: 'contact sales' },
+        ],
+        changes: [
+          { plan: 'Team', field: 'monthlyUsd', from: 39, to: 49 },
+          { plan: 'Business', field: 'seats', from: 20, to: 25 },
+          { plan: 'Scale', field: 'status', from: 'listed', to: 'removed' },
+        ],
+      }
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/launches',
+    price: '6000',
+    name: 'Category launches',
+    description: 'Product launches in a category over the last seven days. Query: ?category=agent-infra',
     handler: (req) => ({
-      ref: String(req.query.ref ?? '145.022'),
-      sales: [
-        { date: '2026-08-30', venue: 'Chrono24', condition: 'Very good', priceUsd: 6850 },
-        { date: '2026-08-21', venue: 'Phillips', condition: 'Excellent', priceUsd: 7400 },
-        { date: '2026-08-09', venue: 'eBay', condition: 'Good', priceUsd: 6120 },
+      category: String(req.query.category ?? 'agent-infra'),
+      window: '7d',
+      launches: [
+        {
+          company: 'Northwind',
+          product: 'Northwind Relay',
+          announcedOn: '2026-09-10',
+          summary: 'Managed egress for agent traffic, priced per request.',
+        },
+        {
+          company: 'Halcyon',
+          product: 'Halcyon Ledger',
+          announcedOn: '2026-09-08',
+          summary: 'Per-agent spend reporting. Read-only — no enforcement.',
+        },
+        {
+          company: 'Perigee',
+          product: 'Perigee Runs',
+          announcedOn: '2026-09-07',
+          summary: 'Hosted agent runtime; usage billed monthly in arrears.',
+        },
       ],
     }),
   },
   {
     method: 'GET',
-    path: '/v1/market-price',
+    path: '/v1/funding',
     price: '5000',
-    name: 'Watch market price',
-    description: 'Current median asking price for a watch reference. Query: ?ref=145.022',
-    handler: (req) => ({ ref: String(req.query.ref ?? '145.022'), medianAskUsd: 7050, listings: 42 }),
+    name: 'Company funding',
+    description: 'Latest disclosed round, total raised and headcount trend. Query: ?company=halcyon',
+    handler: (req) => ({
+      company: String(req.query.company ?? 'halcyon'),
+      lastRound: { series: 'B', amountUsd: 42_000_000, closedOn: '2026-07-22', leadInvestor: 'Meridian Ventures' },
+      totalRaisedUsd: 61_500_000,
+      headcount: { current: 88, ninetyDaysAgo: 61 },
+    }),
   },
 ]
 

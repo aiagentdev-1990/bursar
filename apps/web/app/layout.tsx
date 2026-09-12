@@ -3,7 +3,7 @@ import { Shell } from '@/components/Shell'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Roster',
+  title: 'Bursar',
   description: 'Give every AI agent on your team a role and spending limits, enforced by a contract.',
 }
 

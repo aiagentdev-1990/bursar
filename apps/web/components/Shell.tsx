@@ -7,7 +7,7 @@ import { HireAgentModal } from './HireAgentModal'
 import { ORG_NAME } from '@/lib/org'
 
 const NAV = [
-  { href: '/', label: 'Roster' },
+  { href: '/', label: 'Team' },
   { href: '/activity', label: 'Activity' },
   { href: '/settings', label: 'Settings' },
 ] as const
@@ -26,7 +26,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <header className="header">
         <div className="brand">
           <span className="brand-mark" aria-hidden />
-          <span className="brand-name">Roster</span>
+          <span className="brand-name">Bursar</span>
           <span className="brand-org">{ORG_NAME}</span>
         </div>
 

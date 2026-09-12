@@ -14,7 +14,7 @@ export default function NotFound() {
       </div>
       <p className="prose">That request or agent isn&rsquo;t on this roster.</p>
       <Link className="backlink" href="/" style={{ marginTop: 24 }}>
-        <ArrowLeft /> Roster
+        <ArrowLeft /> Team
       </Link>
     </>
   )

@@ -27,7 +27,7 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
     return (
       <>
         <Link className="backlink" href="/">
-          <ArrowLeft /> Roster
+          <ArrowLeft /> Team
         </Link>
         <Unavailable message={result.message} />
       </>
@@ -45,7 +45,7 @@ export default async function PendingApproval({ params }: { params: Promise<{ re
   return (
     <>
       <Link className="backlink" href="/">
-        <ArrowLeft /> Roster
+        <ArrowLeft /> Team
       </Link>
 
       <div>
